@@ -1,0 +1,194 @@
+"""
+测试相关数据模型
+"""
+
+from typing import Optional, List, Dict, Any
+from enum import Enum
+from pydantic import Field
+
+from app.models.base import BaseModelMixin
+
+
+class TestType(str, Enum):
+    """测试类型"""
+    RETRIEVAL = "retrieval"    # 检索测试
+    GENERATION = "generation"  # 生成测试
+
+
+class TestStatus(str, Enum):
+    """测试状态"""
+    PENDING = "pending"        # 待执行
+    RUNNING = "running"        # 执行中
+    COMPLETED = "completed"    # 已完成
+    FAILED = "failed"          # 失败
+
+
+class TestSet(BaseModelMixin):
+    """测试集模型"""
+    
+    name: str = Field(..., description="测试集名称", min_length=1, max_length=100)
+    description: Optional[str] = Field(None, description="测试集描述", max_length=500)
+    
+    kb_id: str = Field(..., description="关联知识库ID")
+    test_type: TestType = Field(..., description="测试类型")
+    
+    # 统计信息
+    case_count: int = Field(default=0, description="测试用例数量")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": "ts_001",
+                "name": "Python问答测试集",
+                "description": "测试Python相关问题的检索效果",
+                "kb_id": "kb_001",
+                "test_type": "retrieval",
+                "case_count": 100
+            }
+        }
+
+
+class TestCase(BaseModelMixin):
+    """测试用例模型"""
+    
+    test_set_id: str = Field(..., description="所属测试集ID")
+    kb_id: str = Field(..., description="关联知识库ID")
+    
+    # 测试输入
+    query: str = Field(..., description="测试问题/查询", min_length=1)
+    
+    # 期望输出（用于评估）
+    expected_chunks: Optional[List[str]] = Field(
+        None,
+        description="期望检索到的文档分块ID列表"
+    )
+    expected_answer: Optional[str] = Field(None, description="期望的答案")
+    
+    # 元数据
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="测试用例元数据")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": "tc_001",
+                "test_set_id": "ts_001",
+                "kb_id": "kb_001",
+                "query": "Python中如何定义一个类？",
+                "expected_chunks": ["chunk_010", "chunk_011"],
+                "expected_answer": "在Python中使用class关键字定义类..."
+            }
+        }
+
+
+class RetrievalTestResult(BaseModelMixin):
+    """检索测试结果模型"""
+    
+    test_case_id: str = Field(..., description="测试用例ID")
+    test_set_id: str = Field(..., description="测试集ID")
+    kb_id: str = Field(..., description="知识库ID")
+    
+    # 测试输入
+    query: str = Field(..., description="测试查询")
+    
+    # 检索结果
+    retrieved_chunks: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="检索到的分块列表"
+    )
+    retrieval_time: float = Field(..., description="检索耗时(秒)")
+    
+    # 评估指标
+    precision: Optional[float] = Field(None, description="精确率", ge=0.0, le=1.0)
+    recall: Optional[float] = Field(None, description="召回率", ge=0.0, le=1.0)
+    f1_score: Optional[float] = Field(None, description="F1分数", ge=0.0, le=1.0)
+    mrr: Optional[float] = Field(None, description="平均倒数排名", ge=0.0, le=1.0)
+    map_score: Optional[float] = Field(None, description="平均精度均值", ge=0.0, le=1.0)
+    ndcg: Optional[float] = Field(None, description="归一化折损累积增益", ge=0.0, le=1.0)
+    hit_rate: Optional[float] = Field(None, description="命中率", ge=0.0, le=1.0)
+    
+    # 状态
+    status: TestStatus = Field(default=TestStatus.COMPLETED, description="测试状态")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": "rtr_001",
+                "test_case_id": "tc_001",
+                "test_set_id": "ts_001",
+                "kb_id": "kb_001",
+                "query": "Python中如何定义一个类？",
+                "retrieved_chunks": [
+                    {"chunk_id": "chunk_010", "score": 0.95},
+                    {"chunk_id": "chunk_011", "score": 0.88}
+                ],
+                "retrieval_time": 0.15,
+                "precision": 0.9,
+                "recall": 0.85,
+                "f1_score": 0.87
+            }
+        }
+
+
+class GenerationTestResult(BaseModelMixin):
+    """生成测试结果模型"""
+    
+    test_case_id: str = Field(..., description="测试用例ID")
+    test_set_id: str = Field(..., description="测试集ID")
+    kb_id: str = Field(..., description="知识库ID")
+    
+    # 测试输入
+    query: str = Field(..., description="测试问题")
+    
+    # 检索上下文
+    retrieved_chunks: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="检索到的分块"
+    )
+    
+    # 生成结果
+    generated_answer: str = Field(..., description="生成的答案")
+    generation_time: float = Field(..., description="生成耗时(秒)")
+    
+    # 评估指标
+    relevance_score: Optional[float] = Field(
+        None,
+        description="相关性分数",
+        ge=0.0,
+        le=1.0
+    )
+    coherence_score: Optional[float] = Field(
+        None,
+        description="连贯性分数",
+        ge=0.0,
+        le=1.0
+    )
+    faithfulness_score: Optional[float] = Field(
+        None,
+        description="忠实度分数",
+        ge=0.0,
+        le=1.0
+    )
+    
+    # LLM配置
+    llm_model: Optional[str] = Field(None, description="使用的LLM模型")
+    
+    # 状态
+    status: TestStatus = Field(default=TestStatus.COMPLETED, description="测试状态")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": "gtr_001",
+                "test_case_id": "tc_001",
+                "test_set_id": "ts_001",
+                "kb_id": "kb_001",
+                "query": "Python中如何定义一个类？",
+                "generated_answer": "在Python中，使用class关键字定义类...",
+                "generation_time": 2.5,
+                "relevance_score": 0.92,
+                "coherence_score": 0.88,
+                "faithfulness_score": 0.90,
+                "llm_model": "qwen2:7b"
+            }
+        }
+
