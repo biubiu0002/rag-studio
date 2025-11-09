@@ -8,7 +8,7 @@ import { debugAPI } from './api'
 export interface SavedResult {
   id: string
   name: string
-  type: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas'
+  type: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas' | 'sparse_vectors'
   data: any
   timestamp: number
   metadata?: Record<string, any>
@@ -117,4 +117,3 @@ export function importResultFromFile(file: File): Promise<SavedResult> {
     reader.readAsText(file)
   })
 }
-

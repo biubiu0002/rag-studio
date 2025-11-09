@@ -16,7 +16,7 @@ async function request<T>(
   
   // 如果 body 是 FormData，不要设置 Content-Type，让浏览器自动设置
   const isFormData = options.body instanceof FormData
-  const defaultHeaders = isFormData
+  const defaultHeaders: HeadersInit = isFormData
     ? {}
     : {
         'Content-Type': 'application/json',
@@ -34,8 +34,8 @@ async function request<T>(
     const response = await fetch(url, config)
     
     if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.message || '请求失败')
+      const errorText = await response.text();
+      throw new Error(errorText || '请求失败')
     }
     
     return await response.json()
@@ -597,6 +597,7 @@ export const debugAPI = {
     kb_id: string
     chunks: any[]
     vectors: number[][]
+    fields?: string[] // 添加fields参数
   }) => {
     return request<{ success: boolean; data: any }>('/debug/index/vector/write', {
       method: 'POST',
@@ -611,8 +612,24 @@ export const debugAPI = {
     kb_id: string
     chunks: any[]
     tokens_list: string[][]
+    fields?: string[] // 添加fields参数
   }) => {
     return request<{ success: boolean; data: any }>('/debug/index/keyword/write', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  /**
+   * 写入稀疏向量索引
+   */
+  writeSparseVectorIndex: async (data: {
+    kb_id: string
+    chunks: any[]
+    sparse_vectors: any[]
+    fields?: string[] // 添加fields参数
+  }) => {
+    return request<{ success: boolean; data: any }>('/debug/index/sparse-vector/write', {
       method: 'POST',
       body: JSON.stringify(data),
     })
@@ -638,6 +655,40 @@ export const debugAPI = {
   },
 
   /**
+   * Qdrant混合检索
+   */
+  qdrantHybridSearch: async (data: {
+    kb_id: string
+    query: string
+    query_vector?: number[]
+    query_sparse_vector?: { indices: number[]; values: number[] }
+    top_k?: number
+    score_threshold?: number
+    fusion?: string
+    embedding_model?: string
+    generate_sparse_vector?: boolean
+  }) => {
+    return request<{ success: boolean; data: any }>('/debug/retrieve/qdrant-hybrid', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  /**
+   * 生成稀疏向量
+   */
+  generateSparseVector: async (data: {
+    kb_id: string
+    text: string
+    method?: "bm25" | "tf-idf" | "simple"
+  }) => {
+    return request<{ success: boolean; data: any }>('/debug/sparse-vector/generate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  /**
    * 测试RRF融合
    */
   testRRF: async (data: {
@@ -656,7 +707,7 @@ export const debugAPI = {
    */
   saveDebugResult: async (data: {
     name: string
-    type: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas'
+    type: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas' | 'sparse_vectors'
     data: any
     metadata?: Record<string, any>
   }) => {
@@ -669,7 +720,7 @@ export const debugAPI = {
   /**
    * 列出调试结果
    */
-  listDebugResults: async (resultType: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas') => {
+  listDebugResults: async (resultType: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas' | 'sparse_vectors') => {
     return request<{ success: boolean; data: Array<{ id: string; name: string; timestamp: number; metadata?: Record<string, any> }>; message: string }>(
       `/debug/result/list/${resultType}`
     )
@@ -678,7 +729,7 @@ export const debugAPI = {
   /**
    * 加载调试结果
    */
-  loadDebugResult: async (resultType: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas', resultId: string) => {
+  loadDebugResult: async (resultType: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas' | 'sparse_vectors', resultId: string) => {
     return request<{ success: boolean; data: any; message: string }>(
       `/debug/result/load/${resultType}/${resultId}`
     )
@@ -687,7 +738,7 @@ export const debugAPI = {
   /**
    * 删除调试结果
    */
-  deleteDebugResult: async (resultType: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas', resultId: string) => {
+  deleteDebugResult: async (resultType: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas' | 'sparse_vectors', resultId: string) => {
     return request<{ success: boolean; message: string }>(
       `/debug/result/delete/${resultType}/${resultId}`,
       {
@@ -696,4 +747,3 @@ export const debugAPI = {
     )
   },
 }
-

@@ -25,13 +25,19 @@ import { showToast } from "@/lib/toast"
 import { saveResultToStorage, loadResultFromStorage, listResultsByType, type SavedResult } from "@/lib/storage"
 
 // Schema字段类型
-type FieldType = "text" | "array" | "number" | "boolean"
+type FieldType = "text" | "array" | "number" | "boolean" | "keyword" | "sparse_vector"
 
 interface SchemaField {
   name: string
   type: FieldType
   isIndexed: boolean
   isVectorIndex?: boolean
+  isKeywordIndex?: boolean
+  isSparseVectorIndex?: boolean
+  dimension?: number // 用于向量字段
+  description?: string // 字段描述
+  // 添加稀疏向量特定属性
+  sparseMethod?: "bm25" | "tf-idf" | "splade" // 稀疏向量生成方法
 }
 
 export default function KnowledgeBaseConfig() {
@@ -109,6 +115,7 @@ export default function KnowledgeBaseConfig() {
         name: newKbName.trim(),
         embedding_model: "bge-m3:latest",
         vector_db_type: "qdrant",
+        embedding_dimension: 1024, // bge-m3模型的维度是1024
       })
       showToast("知识库创建成功", "success")
       setCreateDialogOpen(false)
@@ -150,18 +157,20 @@ export default function KnowledgeBaseConfig() {
             setVectorDbType(schema.vector_db_type)
           }
         } else {
-          // 如果没有schema，使用默认值
+          // 如果没有schema，使用默认值（包含稀疏向量字段）
           const defaultFields: SchemaField[] = [
             { name: "content", type: "text", isIndexed: true, isVectorIndex: false },
-            { name: "embedding", type: "array", isIndexed: true, isVectorIndex: true },
+            { name: "embedding", type: "array", isIndexed: true, isVectorIndex: true, dimension: 1024 },
+            { name: "sparse_vector", type: "sparse_vector", isIndexed: true, isSparseVectorIndex: true, sparseMethod: "bm25" }
           ]
           setSchemaFields(defaultFields)
         }
       } catch (schemaErr: any) {
-        // 如果获取schema失败，使用默认值
+        // 如果获取schema失败，使用默认值（包含稀疏向量字段）
         const defaultFields: SchemaField[] = [
           { name: "content", type: "text", isIndexed: true, isVectorIndex: false },
-          { name: "embedding", type: "array", isIndexed: true, isVectorIndex: true },
+          { name: "embedding", type: "array", isIndexed: true, isVectorIndex: true, dimension: 1024 },
+          { name: "sparse_vector", type: "sparse_vector", isIndexed: true, isSparseVectorIndex: true, sparseMethod: "bm25" }
         ]
         setSchemaFields(defaultFields)
       }
@@ -444,10 +453,34 @@ export default function KnowledgeBaseConfig() {
                               ? "数组"
                               : field.type === "number"
                               ? "数字"
-                              : "布尔"}
+                              : field.type === "boolean"
+                              ? "布尔"
+                              : field.type === "keyword"
+                              ? "关键词"
+                              : "稀疏向量"}
                             {field.isVectorIndex && (
                               <span className="ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded">
                                 向量索引
+                              </span>
+                            )}
+                            {field.isKeywordIndex && (
+                              <span className="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded">
+                                关键词索引
+                              </span>
+                            )}
+                            {field.isSparseVectorIndex && (
+                              <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 text-purple-700 rounded">
+                                稀疏向量索引
+                              </span>
+                            )}
+                            {field.type === "sparse_vector" && field.sparseMethod && (
+                              <span className="ml-2 px-2 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded">
+                                {field.sparseMethod.toUpperCase()}
+                              </span>
+                            )}
+                            {field.dimension && (
+                              <span className="ml-2 px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded">
+                                {field.dimension}维
                               </span>
                             )}
                           </td>
@@ -530,8 +563,22 @@ export default function KnowledgeBaseConfig() {
                       <SelectItem value="array">数组</SelectItem>
                       <SelectItem value="number">数字</SelectItem>
                       <SelectItem value="boolean">布尔</SelectItem>
+                      <SelectItem value="keyword">关键词</SelectItem>
+                      <SelectItem value="sparse_vector">稀疏向量</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    字段描述
+                  </label>
+                  <Input
+                    value={editingField.description || ""}
+                    onChange={(e) =>
+                      setEditingField({ ...editingField, description: e.target.value })
+                    }
+                    placeholder="输入字段描述"
+                  />
                 </div>
                 <div className="space-y-2">
                   <label className="flex items-center space-x-2">
@@ -553,16 +600,96 @@ export default function KnowledgeBaseConfig() {
                       <input
                         type="checkbox"
                         checked={editingField.isVectorIndex}
-                        onChange={(e) =>
-                          setEditingField({
+                        onChange={(e) => {
+                          const newEditingField = {
                             ...editingField,
                             isVectorIndex: e.target.checked,
-                          })
-                        }
+                          };
+                          // 如果选中向量索引，确保类型为array
+                          if (e.target.checked) {
+                            newEditingField.type = "array";
+                          }
+                          setEditingField(newEditingField);
+                        }}
                         className="rounded border-gray-300"
                       />
                       <span className="text-sm text-gray-700">向量索引</span>
                     </label>
+                  )}
+                  {editingField.type === "keyword" && (
+                    <label className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        checked={editingField.isKeywordIndex}
+                        onChange={(e) =>
+                          setEditingField({
+                            ...editingField,
+                            isKeywordIndex: e.target.checked,
+                          })
+                        }
+                        className="rounded border-gray-300"
+                      />
+                      <span className="text-sm text-gray-700">关键词索引</span>
+                    </label>
+                  )}
+                  {editingField.type === "sparse_vector" && (
+                    <label className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        checked={editingField.isSparseVectorIndex}
+                        onChange={(e) =>
+                          setEditingField({
+                            ...editingField,
+                            isSparseVectorIndex: e.target.checked,
+                          })
+                        }
+                        className="rounded border-gray-300"
+                      />
+                      <span className="text-sm text-gray-700">稀疏向量索引</span>
+                    </label>
+                  )}
+                  {(editingField.type === "array" && editingField.isVectorIndex) && (
+                    <div className="mt-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        向量维度
+                      </label>
+                      <Input
+                        type="number"
+                        value={editingField.dimension || ""}
+                        onChange={(e) =>
+                          setEditingField({ 
+                            ...editingField, 
+                            dimension: parseInt(e.target.value) || undefined 
+                          })
+                        }
+                        placeholder="输入向量维度"
+                      />
+                    </div>
+                  )}
+                  {editingField.type === "sparse_vector" && editingField.isSparseVectorIndex && (
+                    <div className="mt-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        稀疏向量生成方法
+                      </label>
+                      <Select
+                        value={editingField.sparseMethod || "bm25"}
+                        onValueChange={(value: "bm25" | "tf-idf" | "splade") =>
+                          setEditingField({ 
+                            ...editingField, 
+                            sparseMethod: value
+                          })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="bm25">BM25</SelectItem>
+                          <SelectItem value="tf-idf">TF-IDF</SelectItem>
+                          <SelectItem value="splade">SPLADE</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   )}
                 </div>
               </div>

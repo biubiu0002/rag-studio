@@ -7,16 +7,29 @@ import { debugAPI } from "@/lib/api"
 import { saveResultToStorage, listResultsByType, loadResultFromStorage, exportResultToFile, importResultFromFile, SavedResult } from "@/lib/storage"
 import { showToast } from "@/lib/toast"
 
+// 定义chunk的类型
+type ChunkType = string | { content: string; [key: string]: any }
+
 export default function DocumentTokenizationView() {
   const [loading, setLoading] = useState(false)
   const [chunksText, setChunksText] = useState<string>("")
-  const [chunks, setChunks] = useState<string[]>([])
+  const [chunks, setChunks] = useState<ChunkType[]>([])
   const [tokens, setTokens] = useState<string[][]>([])
   const [tokenPreview, setTokenPreview] = useState<any[]>([])
   const [tokenConfig, setTokenConfig] = useState({
     mode: "search",
     use_stop_words: true
   })
+  
+  // 稀疏向量相关状态
+  const [sparseVectors, setSparseVectors] = useState<any[]>([])
+  const [sparseVectorPreview, setSparseVectorPreview] = useState<any[]>([])
+  const [sparseVectorConfig, setSparseVectorConfig] = useState({
+    method: "sparse"
+  })
+  const [savedSparseVectors, setSavedSparseVectors] = useState<SavedResult[]>([])
+  const [selectedSparseVectorId, setSelectedSparseVectorId] = useState<string>("")
+  
   const jsonFileInputRef = useRef<HTMLInputElement>(null)
   
   // 保存的结果列表
@@ -30,6 +43,7 @@ export default function DocumentTokenizationView() {
   useEffect(() => {
     loadSavedChunks().catch(console.error)
     loadSavedTokens().catch(console.error)
+    loadSavedSparseVectors().catch(console.error)
   }, [])
 
   const loadSavedChunks = async () => {
@@ -42,6 +56,10 @@ export default function DocumentTokenizationView() {
     setSavedTokens(results)
   }
 
+  const loadSavedSparseVectors = async () => {
+    const results = await listResultsByType('sparse_vectors')
+    setSavedSparseVectors(results)
+  }
 
   // 执行分词
   const handleTokenize = async () => {
@@ -54,7 +72,7 @@ export default function DocumentTokenizationView() {
       setLoading(true)
       
       const result = await debugAPI.tokenizeJieba({
-        texts: chunks,
+        texts: chunks.map(chunk => typeof chunk === 'string' ? chunk : chunk.content),
         mode: tokenConfig.mode,
         use_stop_words: tokenConfig.use_stop_words
       })
@@ -69,6 +87,156 @@ export default function DocumentTokenizationView() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // 生成稀疏向量
+  const handleGenerateSparseVectors = async () => {
+    if (chunks.length === 0) {
+      showToast("请先选择文档", "warning")
+      return
+    }
+    
+    try {
+      setLoading(true)
+      
+      // 生成稀疏向量
+      const sparseVectorsData: any[] = []
+      const previewData: any[] = []
+      
+      for (let i = 0; i < Math.min(chunks.length, 5); i++) { // 只预览前5个
+        const chunk = chunks[i]
+        try {
+          // 确保获取正确的文本内容
+          const textContent = typeof chunk === 'string' ? chunk : chunk.content
+          
+          const result = await debugAPI.generateSparseVector({
+            kb_id: "temp_kb", // 临时知识库ID，实际使用时需要替换
+            text: textContent,
+            method: sparseVectorConfig.method === "bm25" ? "bm25" : 
+                   sparseVectorConfig.method === "tf" ? "tf-idf" : 
+                   "simple"
+          })
+          
+          sparseVectorsData.push(result.data)
+          previewData.push({
+            index: i,
+            original: textContent,
+            sparse_vector: result.data.sparse_vector,
+            qdrant_format: result.data.qdrant_format,
+            sparsity: result.data.sparsity
+          })
+        } catch (error) {
+          // 确保获取正确的文本内容
+          const textContent = typeof chunk === 'string' ? chunk : chunk.content
+          
+          console.error(`生成第${i}个分块的稀疏向量失败:`, error)
+          previewData.push({
+            index: i,
+            original: textContent,
+            error: (error as Error).message
+          })
+        }
+      }
+      
+      setSparseVectors(sparseVectorsData)
+      setSparseVectorPreview(previewData)
+      
+      showToast(`稀疏向量生成完成！共处理 ${chunks.length} 个分块`, "success")
+    } catch (error) {
+      console.error("稀疏向量生成失败:", error)
+      showToast("稀疏向量生成失败: " + (error as Error).message, "error")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // 保存稀疏向量结果
+  const handleSaveSparseVectors = async () => {
+    if (sparseVectors.length === 0) {
+      showToast("没有可保存的稀疏向量数据", "warning")
+      return
+    }
+    
+    try {
+      const name = saveName.trim() || `稀疏向量结果_${new Date().toLocaleString()}`
+      const id = await saveResultToStorage({
+        name,
+        type: 'sparse_vectors',
+        data: {
+          vectors: sparseVectors,
+          preview: sparseVectorPreview,
+          chunks: chunks,
+          config: sparseVectorConfig
+        },
+        metadata: {
+          vector_count: sparseVectors.length,
+          method: sparseVectorConfig.method
+        }
+      })
+      
+      showToast(`保存成功！ID: ${id}`, "success")
+      setSaveName("")
+      await loadSavedSparseVectors()
+    } catch (error) {
+      showToast("保存失败: " + (error as Error).message, "error")
+    }
+  }
+
+  // 加载已保存的稀疏向量
+  const handleLoadSparseVectors = async () => {
+    if (!selectedSparseVectorId) {
+      showToast("请选择要加载的稀疏向量结果", "warning")
+      return
+    }
+    
+    try {
+      const result = await loadResultFromStorage('sparse_vectors', selectedSparseVectorId)
+      if (!result || result.type !== 'sparse_vectors') {
+        showToast("加载失败：无效的结果", "error")
+        return
+      }
+      
+      setSparseVectors(result.data.vectors || [])
+      setSparseVectorPreview(result.data.preview || [])
+      if (result.data.chunks) {
+        setChunks(result.data.chunks)
+        setChunksText(result.data.chunks.join('\n'))
+      }
+      if (result.data.config) {
+        setSparseVectorConfig(result.data.config)
+      }
+      
+      showToast(`加载成功！${result.name}`, "success")
+    } catch (error) {
+      showToast("加载失败: " + (error as Error).message, "error")
+    }
+  }
+
+  // 导出稀疏向量为JSON文件
+  const handleExportSparseVectors = () => {
+    if (sparseVectors.length === 0) {
+      showToast("没有可导出的稀疏向量数据", "warning")
+      return
+    }
+    
+    const result: SavedResult = {
+      id: '',
+      name: saveName.trim() || `稀疏向量结果_${new Date().toLocaleString()}`,
+      type: 'sparse_vectors',
+      data: {
+        vectors: sparseVectors,
+        preview: sparseVectorPreview,
+        chunks: chunks,
+        config: sparseVectorConfig
+      },
+      timestamp: Date.now(),
+      metadata: {
+        vector_count: sparseVectors.length,
+        method: sparseVectorConfig.method
+      }
+    }
+    
+    exportResultToFile(result)
   }
 
   // 从chunks结果加载
@@ -179,8 +347,16 @@ export default function DocumentTokenizationView() {
           setChunksText(result.data.chunks.join('\n'))
         }
         showToast(`导入成功！${result.name}`, "success")
+      } else if (result.type === 'sparse_vectors') {
+        setSparseVectors(result.data.vectors || [])
+        setSparseVectorPreview(result.data.preview || [])
+        if (result.data.chunks) {
+          setChunks(result.data.chunks)
+          setChunksText(result.data.chunks.join('\n'))
+        }
+        showToast(`导入成功！${result.name}`, "success")
       } else {
-        showToast("文件类型不匹配，需要chunks或tokens类型", "error")
+        showToast("文件类型不匹配，需要chunks、tokens或sparse_vectors类型", "error")
       }
     } catch (error) {
       showToast("导入失败: " + (error as Error).message, "error")
@@ -337,6 +513,30 @@ export default function DocumentTokenizationView() {
               </div>
             </div>
           </div>
+          
+          {/* 稀疏向量配置 */}
+          <div className="border-t pt-4">
+            <label className="block text-sm font-medium mb-2">稀疏向量配置</label>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">生成方法</label>
+                <select
+                  value={sparseVectorConfig.method}
+                  onChange={(e) => setSparseVectorConfig({ ...sparseVectorConfig, method: e.target.value })}
+                  className="w-full p-2 border rounded"
+                >
+                  <option value="bm25">BM25</option>
+                  <option value="tf">TF-IDF</option>
+                  <option value="simple">Simple</option>
+                </select>
+                <div className="text-xs text-gray-500 mt-1">
+                  {sparseVectorConfig.method === "bm25" && "基于BM25算法的稀疏向量"}
+                  {sparseVectorConfig.method === "tf" && "基于TF-IDF算法的稀疏向量"}
+                  {sparseVectorConfig.method === "simple" && "简单计数的稀疏向量"}
+                </div>
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -352,13 +552,21 @@ export default function DocumentTokenizationView() {
             </div>
           </div>
 
-          <Button 
-            onClick={handleTokenize} 
-            disabled={chunks.length === 0 || loading}
-            className="w-full"
-          >
-            {loading ? "分词中..." : "开始分词"}
-          </Button>
+          <div className="grid grid-cols-2 gap-4">
+            <Button 
+              onClick={handleTokenize} 
+              disabled={chunks.length === 0 || loading}
+            >
+              {loading ? "分词中..." : "开始分词"}
+            </Button>
+            <Button 
+              onClick={handleGenerateSparseVectors} 
+              disabled={chunks.length === 0 || loading}
+              variant="outline"
+            >
+              {loading ? "生成中..." : "生成稀疏向量"}
+            </Button>
+          </div>
 
           {/* 分词预览 */}
           {tokenPreview.length > 0 && (
@@ -402,6 +610,56 @@ export default function DocumentTokenizationView() {
             </div>
           )}
 
+          {/* 稀疏向量预览 */}
+          {sparseVectorPreview.length > 0 && (
+            <div>
+              <div className="font-medium mb-2">稀疏向量结果预览:</div>
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {sparseVectorPreview.slice(0, 5).map((item, idx) => (
+                  <div key={idx} className="p-3 border rounded bg-gray-50">
+                    <div className="text-xs text-gray-500 mb-1">
+                      Chunk {item.index !== undefined ? item.index : idx + 1}
+                    </div>
+                    {item.original && (
+                      <div className="text-sm text-gray-600 mb-1">
+                        原文: {item.original.substring(0, 50)}...
+                      </div>
+                    )}
+                    {item.error ? (
+                      <div className="text-sm text-red-600">
+                        错误: {item.error}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-sm">
+                          非零元素数: {item.sparsity || 0}
+                        </div>
+                        {item.sparse_vector && (
+                          <div className="text-xs text-gray-500 mt-1">
+                            稀疏向量: {JSON.stringify(Object.entries(item.sparse_vector).slice(0, 3))}...
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {sparseVectorPreview.length > 5 && (
+                <div className="text-sm text-gray-500 mt-2">
+                  ...还有 {sparseVectorPreview.length - 5} 个分块的稀疏向量结果
+                </div>
+              )}
+            </div>
+          )}
+
+          {sparseVectors.length > 0 && (
+            <div className="p-3 bg-green-50 rounded">
+              <div className="text-sm text-green-800">
+                ✓ 稀疏向量生成完成！共处理 {sparseVectors.length} 个分块
+              </div>
+            </div>
+          )}
+
           {/* 保存/加载功能 */}
           <div className="border-t pt-4 space-y-4">
             <div className="font-medium mb-2">保存/加载结果</div>
@@ -416,17 +674,23 @@ export default function DocumentTokenizationView() {
                 className="flex-1 p-2 border rounded text-sm"
               />
               <Button onClick={handleSaveTokens} disabled={tokens.length === 0} variant="outline">
-                保存到本地
+                保存分词结果
+              </Button>
+              <Button onClick={handleSaveSparseVectors} disabled={sparseVectors.length === 0} variant="outline">
+                保存稀疏向量
               </Button>
               <Button onClick={handleExportTokens} disabled={tokens.length === 0} variant="outline">
-                导出JSON
+                导出分词JSON
+              </Button>
+              <Button onClick={handleExportSparseVectors} disabled={sparseVectors.length === 0} variant="outline">
+                导出稀疏向量JSON
               </Button>
             </div>
 
             {/* 从已保存结果加载 */}
             <div>
               <label className="block text-sm font-medium mb-2">从已保存结果加载</label>
-              <div className="flex gap-2">
+              <div className="flex gap-2 mb-2">
                 <select
                   value={selectedTokenId}
                   onChange={(e) => setSelectedTokenId(e.target.value)}
@@ -440,10 +704,32 @@ export default function DocumentTokenizationView() {
                   ))}
                 </select>
                 <Button onClick={handleLoadTokens} disabled={!selectedTokenId} variant="outline">
-                  加载
+                  加载分词
                 </Button>
+              </div>
+              <div className="flex gap-2">
+                <select
+                  value={selectedSparseVectorId}
+                  onChange={(e) => setSelectedSparseVectorId(e.target.value)}
+                  className="flex-1 p-2 border rounded text-sm"
+                >
+                  <option value="">选择已保存的稀疏向量结果...</option>
+                  {savedSparseVectors.map((result) => (
+                    <option key={result.id} value={result.id}>
+                      {result.name} ({new Date(result.timestamp).toLocaleString()}) - {result.metadata?.vector_count || 0}个分块
+                    </option>
+                  ))}
+                </select>
+                <Button onClick={handleLoadSparseVectors} disabled={!selectedSparseVectorId} variant="outline">
+                  加载稀疏向量
+                </Button>
+              </div>
+              <div className="flex gap-2 mt-2">
                 <Button onClick={loadSavedTokens} variant="outline" size="sm">
-                  刷新
+                  刷新分词列表
+                </Button>
+                <Button onClick={loadSavedSparseVectors} variant="outline" size="sm">
+                  刷新稀疏向量列表
                 </Button>
               </div>
             </div>
@@ -453,4 +739,3 @@ export default function DocumentTokenizationView() {
     </div>
   )
 }
-

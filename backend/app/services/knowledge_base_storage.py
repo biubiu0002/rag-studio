@@ -51,7 +51,8 @@ class KnowledgeBaseStorageService:
         # 从索引中查找文件路径
         index_data = self._load_index()
         for item in index_data:
-            if item.get("id") == kb_id:
+            item_id = item.get("id")
+            if item_id and item_id == kb_id:
                 # 使用索引中的 id 作为文件名
                 return self.storage_dir / f"{kb_id}.json"
         # 如果索引中没有，尝试直接使用 kb_id
@@ -99,6 +100,14 @@ class KnowledgeBaseStorageService:
                 details={"id": kb.id}
             )
         
+        # 如果没有提供schema_fields，使用默认的包含稀疏向量字段的schema
+        if schema_fields is None:
+            schema_fields = [
+                {"name": "content", "type": "text", "isIndexed": True, "isVectorIndex": False},
+                {"name": "embedding", "type": "array", "isIndexed": True, "isVectorIndex": True},
+                {"name": "sparse_vector", "type": "sparse_vector", "isIndexed": True, "isSparseVectorIndex": True}
+            ]
+        
         # 构建配置对象（使用 debug_results 格式）
         config = {
             "id": kb.id,
@@ -108,10 +117,7 @@ class KnowledgeBaseStorageService:
                 **kb.model_dump(),
                 "schema": {
                     "vector_db_type": kb.vector_db_type,
-                    "fields": schema_fields or [
-                        {"name": "content", "type": "text", "isIndexed": True, "isVectorIndex": False},
-                        {"name": "embedding", "type": "array", "isIndexed": True, "isVectorIndex": True}
-                    ]
+                    "fields": schema_fields
                 }
             },
             "timestamp": int(datetime.now().timestamp() * 1000),
@@ -119,7 +125,7 @@ class KnowledgeBaseStorageService:
                 "kb_id": kb.id,
                 "kb_name": kb.name,
                 "vector_db_type": kb.vector_db_type,
-                "field_count": len(schema_fields) if schema_fields else 2
+                "field_count": len(schema_fields)
             }
         }
         
@@ -165,10 +171,13 @@ class KnowledgeBaseStorageService:
             filtered_items = []
             for item in index_data:
                 match = True
+                item_id = item.get("id")
+                if not item_id:
+                    continue
                 for key, value in filters.items():
                     if key == "is_active":
                         # 需要加载完整配置来检查 is_active
-                        config = self._load_kb_config(item.get("id"))
+                        config = self._load_kb_config(item_id)
                         if config:
                             kb_data = config.get("data", {})
                             if kb_data.get("is_active") != value:
@@ -187,7 +196,10 @@ class KnowledgeBaseStorageService:
         # 加载知识库对象
         kbs = []
         for item in paginated_items:
-            kb = await self.get_by_id(item.get("id"))
+            item_id = item.get("id")
+            if not item_id:
+                continue
+            kb = await self.get_by_id(item_id)
             if kb:
                 kbs.append(kb)
         
@@ -201,9 +213,12 @@ class KnowledgeBaseStorageService:
             count = 0
             for item in index_data:
                 match = True
+                item_id = item.get("id")
+                if not item_id:
+                    continue
                 for key, value in filters.items():
                     if key == "is_active":
-                        config = self._load_kb_config(item.get("id"))
+                        config = self._load_kb_config(item_id)
                         if config:
                             kb_data = config.get("data", {})
                             if kb_data.get("is_active") != value:

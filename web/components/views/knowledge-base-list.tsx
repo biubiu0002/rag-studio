@@ -11,7 +11,7 @@ export default function KnowledgeBaseList() {
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
+  
   // 加载知识库列表
   const loadKnowledgeBases = async () => {
     try {
@@ -39,6 +39,19 @@ export default function KnowledgeBaseList() {
       loadKnowledgeBases()
     } catch (err: any) {
       showToast(`删除失败: ${err.message}`, "error")
+    }
+  }
+
+  // 导航到创建知识库页面
+  const handleCreateKnowledgeBase = () => {
+    // 通过window对象传递消息
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('navigate', { 
+        detail: { 
+          view: "knowledge-base-config", 
+          path: ["RAG Studio", "知识库配置"] 
+        } 
+      }))
     }
   }
 
@@ -74,7 +87,7 @@ export default function KnowledgeBaseList() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-gray-900">知识库列表</h2>
-        <Button className="bg-blue-600 hover:bg-blue-700">
+        <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleCreateKnowledgeBase}>
           <Plus size={16} className="mr-2" />
           新建知识库
         </Button>
@@ -83,7 +96,7 @@ export default function KnowledgeBaseList() {
       {knowledgeBases.length === 0 ? (
         <Card className="p-12 text-center">
           <p className="text-gray-500 mb-4">还没有创建知识库</p>
-          <Button className="bg-blue-600 hover:bg-blue-700">
+          <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleCreateKnowledgeBase}>
             <Plus size={16} className="mr-2" />
             创建第一个知识库
           </Button>

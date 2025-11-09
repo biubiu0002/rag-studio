@@ -6,7 +6,7 @@ RAG链路调试控制器
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import logging
 import tempfile
 import os
@@ -63,6 +63,26 @@ class HybridSearchRequest(BaseModel):
     rrf_k: int = Field(60, description="RRF参数k", ge=1)
     embedding_model: str = Field("bge-m3:latest", description="Embedding模型")
     tokenize_mode: str = Field("search", description="分词模式")
+
+
+class QdrantHybridSearchRequest(BaseModel):
+    """Qdrant混合检索请求"""
+    kb_id: str = Field(..., description="知识库ID")
+    query: str = Field(..., description="查询文本")
+    query_vector: Optional[List[float]] = Field(None, description="查询向量（如果提供则直接使用）")
+    query_sparse_vector: Optional[Dict[str, Any]] = Field(None, description="稀疏查询向量（indices和values）")
+    top_k: int = Field(10, description="返回数量")
+    score_threshold: float = Field(0.0, description="分数阈值", ge=0, le=1)
+    fusion: str = Field("rrf", description="融合方法: rrf, dbsf")
+    embedding_model: str = Field("bge-m3:latest", description="Embedding模型")
+    generate_sparse_vector: bool = Field(True, description="是否自动生成稀疏向量（使用SPLADE等模型）")
+
+
+class SparseVectorRequest(BaseModel):
+    """稀疏向量生成请求"""
+    kb_id: str = Field(..., description="知识库ID")
+    text: str = Field(..., description="输入文本")
+    method: str = Field("bm25", description="稀疏向量生成方法: bm25, tf-idf, splade")
 
 
 # ========== 步骤1: 文档处理 ==========
@@ -346,76 +366,476 @@ async def tokenize_jieba(request: TokenizeRequest):
 
 # ========== 步骤4: 索引写入 ==========
 
+class WriteVectorIndexRequest(BaseModel):
+    """写入向量索引请求"""
+    kb_id: str = Field(..., description="知识库ID")
+    chunks: List[Dict[str, Any]] = Field(..., description="分块数据列表")
+    vectors: List[List[float]] = Field(..., description="向量列表")
+    fields: Optional[List[str]] = Field(None, description="要写入的字段列表")
+
+
+class WriteKeywordIndexRequest(BaseModel):
+    """写入关键词索引请求"""
+    kb_id: str = Field(..., description="知识库ID")
+    chunks: List[Dict[str, Any]] = Field(..., description="分块数据列表")
+    tokens_list: List[List[str]] = Field(..., description="分词结果列表")
+    fields: Optional[List[str]] = Field(None, description="要写入的字段列表")
+
+
+class WriteSparseVectorIndexRequest(BaseModel):
+    """写入稀疏向量索引请求"""
+    kb_id: str = Field(..., description="知识库ID")
+    chunks: List[Dict[str, Any]] = Field(..., description="分块数据列表")
+    sparse_vectors: List[Dict[str, Any]] = Field(..., description="稀疏向量列表，每个元素包含indices和values")
+    fields: Optional[List[str]] = Field(None, description="要写入的字段列表")
+
+
 @router.post("/index/vector/write", summary="写入向量索引")
-async def write_vector_index(
-    kb_id: str,
-    chunks: List[Dict[str, Any]],
-    vectors: List[List[float]]
-):
+async def write_vector_index(request: WriteVectorIndexRequest):
     """
     将向量写入向量数据库
     
-    Args:
-        kb_id: 知识库ID
-        chunks: 分块数据列表
-        vectors: 向量列表
-        
     Returns:
         写入结果
     """
     try:
-        # TODO: 实现向量索引写入
-        # 1. 获取向量数据库连接
-        # 2. 批量写入向量
-        # 3. 返回结果
+        # 获取知识库信息
+        from app.services.knowledge_base import KnowledgeBaseService
+        kb_service = KnowledgeBaseService()
+        kb = await kb_service.get_knowledge_base(request.kb_id)
         
-        logger.warning("向量索引写入功能待实现")
+        if not kb:
+            raise HTTPException(status_code=404, detail=f"知识库不存在: {request.kb_id}")
+        
+        # 获取知识库的schema配置
+        kb_schema = await kb_service.get_knowledge_base_schema(request.kb_id)
+        
+        # 获取向量数据库服务
+        from app.services.vector_db_service import VectorDBServiceFactory
+        from app.models.knowledge_base import VectorDBType
+        vector_db_service = VectorDBServiceFactory.create(VectorDBType(kb.vector_db_type))
+        
+        # 创建集合（如果不存在）
+        vector_dimension = kb.embedding_dimension
+        # 如果schema中指定了维度，则使用schema中的维度
+        if kb_schema:
+            for field in kb_schema.get("fields", []):
+                if field.get("isVectorIndex") and "dimension" in field:
+                    vector_dimension = field["dimension"]
+                    break
+        
+        # 验证向量维度是否与传入的向量一致
+        if request.vectors and len(request.vectors) > 0:
+            actual_dimension = len(request.vectors[0])
+            if actual_dimension != vector_dimension:
+                logger.warning(f"向量维度不匹配: 配置维度 {vector_dimension}, 实际维度 {actual_dimension}")
+                # 更新维度配置以匹配实际向量维度
+                vector_dimension = actual_dimension
+        
+        await vector_db_service.create_collection(
+            collection_name=request.kb_id,
+            dimension=vector_dimension,
+            schema_fields=kb_schema.get("fields", []) if kb_schema else []
+        )
+        
+        # 准备数据
+        vectors = request.vectors
+        metadatas = []
+        ids = []
+        
+        # 获取schema定义的字段
+        schema_fields = kb_schema.get("fields", []) if kb_schema else []
+        field_names = [field["name"] for field in schema_fields]
+        
+        # 如果请求中指定了fields，则只处理这些字段
+        if request.fields:
+            field_names = [f for f in field_names if f in request.fields]
+        
+        for i, chunk in enumerate(request.chunks):
+            metadata: Dict[str, Any] = {
+                "kb_id": request.kb_id,
+            }
+            
+            # 根据schema定义添加字段
+            for field in schema_fields:
+                field_name = field["name"]
+                # 如果指定了要处理的字段，但当前字段不在其中，则跳过
+                if request.fields and field_name not in request.fields:
+                    continue
+                    
+                # 如果字段是向量索引字段，跳过（向量单独处理）
+                if field.get("isVectorIndex"):
+                    continue
+                    
+                # 从chunk中获取字段值，如果不存在则使用默认值
+                if field_name in chunk:
+                    metadata[field_name] = chunk[field_name]
+                else:
+                    # 设置默认值
+                    field_type = field.get("type", "text")
+                    if field_type == "text":
+                        metadata[field_name] = ""
+                    elif field_type == "number":
+                        metadata[field_name] = 0
+                    elif field_type == "boolean":
+                        metadata[field_name] = False
+                    elif field_type == "array":
+                        metadata[field_name] = []
+                    elif field_type == "keyword":
+                        metadata[field_name] = ""
+                    else:
+                        metadata[field_name] = ""
+            
+            # 添加默认字段
+            if "chunk_id" not in metadata:
+                metadata["chunk_id"] = chunk.get("id", f"chunk_{i}")
+            if "content" not in metadata:
+                metadata["content"] = chunk.get("content", "")
+            if "char_count" not in metadata:
+                metadata["char_count"] = chunk.get("char_count", 0)
+            if "token_count" not in metadata:
+                metadata["token_count"] = chunk.get("token_count", 0)
+            if "source" not in metadata:
+                metadata["source"] = chunk.get("source", "")
+            if "created_at" not in metadata:
+                metadata["created_at"] = chunk.get("created_at", "")
+            
+            metadatas.append(metadata)
+            # 处理ID，确保符合Qdrant的要求
+            chunk_id = chunk.get("id", f"chunk_{i}")
+            # 如果ID是数字字符串，转换为整数
+            try:
+                int_id = int(chunk_id)
+                if int_id >= 0:
+                    ids.append(int_id)
+                else:
+                    ids.append(chunk_id)  # 负数保持为字符串
+            except ValueError:
+                # 不是数字，保持为字符串
+                ids.append(chunk_id)
+        
+        # 插入向量
+        # 验证向量维度是否与配置一致
+        if vectors and len(vectors) > 0:
+            actual_dimension = len(vectors[0])
+            if actual_dimension != vector_dimension:
+                logger.warning(f"向量维度不匹配: 配置维度 {vector_dimension}, 实际维度 {actual_dimension}")
+                # 更新维度配置以匹配实际向量维度
+                vector_dimension = actual_dimension
+        
+        # 转换向量格式以匹配insert_vectors方法的签名
+        processed_vectors: List[Union[List[float], Dict[str, Any]]] = []  # type: ignore
+        for vector in vectors:
+            processed_vectors.append(vector)
+        
+        await vector_db_service.insert_vectors(
+            collection_name=request.kb_id,
+            vectors=processed_vectors,
+            metadatas=metadatas,
+            ids=ids
+        )
         
         return JSONResponse(
             content=success_response(
                 data={
-                    "kb_id": kb_id,
+                    "kb_id": request.kb_id,
                     "written_count": len(vectors),
-                    "status": "pending_implementation"
+                    "status": "success"
                 },
-                message="向量索引写入功能待实现"
+                message=f"成功写入 {len(vectors)} 个向量到 {kb.vector_db_type}"
             )
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"向量索引写入失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"写入失败: {str(e)}")
 
 
-@router.post("/index/keyword/write", summary="写入关键词索引")
-async def write_keyword_index(
-    kb_id: str,
-    chunks: List[Dict[str, Any]],
-    tokens_list: List[List[str]]
-):
+@router.post("/index/sparse-vector/write", summary="写入稀疏向量索引")
+async def write_sparse_vector_index(request: WriteSparseVectorIndexRequest):
     """
-    将分词结果写入关键词索引
+    将稀疏向量写入向量数据库
     
-    Args:
-        kb_id: 知识库ID
-        chunks: 分块数据列表
-        tokens_list: 分词结果列表
-        
     Returns:
         写入结果
     """
     try:
+        # 获取知识库信息
+        from app.services.knowledge_base import KnowledgeBaseService
+        kb_service = KnowledgeBaseService()
+        kb = await kb_service.get_knowledge_base(request.kb_id)
+        
+        if not kb:
+            raise HTTPException(status_code=404, detail=f"知识库不存在: {request.kb_id}")
+        
+        # 获取知识库的schema配置
+        kb_schema = await kb_service.get_knowledge_base_schema(request.kb_id)
+        
+        # 获取向量数据库服务
+        from app.services.vector_db_service import VectorDBServiceFactory
+        from app.models.knowledge_base import VectorDBType
+        vector_db_service = VectorDBServiceFactory.create(VectorDBType(kb.vector_db_type))
+        
+        # 创建集合（如果不存在）
+        vector_dimension = kb.embedding_dimension
+        # 如果schema中指定了维度，则使用schema中的维度
+        if kb_schema:
+            for field in kb_schema.get("fields", []):
+                if field.get("isVectorIndex") and "dimension" in field:
+                    vector_dimension = field["dimension"]
+                    break
+        
+        await vector_db_service.create_collection(
+            collection_name=request.kb_id,
+            dimension=vector_dimension,
+            schema_fields=kb_schema.get("fields", []) if kb_schema else []
+        )
+        
+        # 准备数据
+        sparse_vectors = request.sparse_vectors
+        metadatas = []
+        ids = []
+        
+        # 获取schema定义的字段
+        schema_fields = kb_schema.get("fields", []) if kb_schema else []
+        field_names = [field["name"] for field in schema_fields]
+        
+        # 如果请求中指定了fields，则只处理这些字段
+        if request.fields:
+            field_names = [f for f in field_names if f in request.fields]
+        
+        for i, chunk in enumerate(request.chunks):
+            metadata: Dict[str, Any] = {
+                "kb_id": request.kb_id,
+            }
+            
+            # 根据schema定义添加字段
+            for field in schema_fields:
+                field_name = field["name"]
+                # 如果指定了要处理的字段，但当前字段不在其中，则跳过
+                if request.fields and field_name not in request.fields:
+                    continue
+                    
+                # 如果字段是向量索引字段，跳过（向量单独处理）
+                if field.get("isVectorIndex"):
+                    continue
+                    
+                # 从chunk中获取字段值，如果不存在则使用默认值
+                if field_name in chunk:
+                    metadata[field_name] = chunk[field_name]
+                else:
+                    # 设置默认值
+                    field_type = field.get("type", "text")
+                    if field_type == "text":
+                        metadata[field_name] = ""
+                    elif field_type == "number":
+                        metadata[field_name] = 0
+                    elif field_type == "boolean":
+                        metadata[field_name] = False
+                    elif field_type == "array":
+                        metadata[field_name] = []
+                    elif field_type == "keyword":
+                        metadata[field_name] = ""
+                    else:
+                        metadata[field_name] = ""
+            
+            # 添加默认字段
+            if "chunk_id" not in metadata:
+                metadata["chunk_id"] = chunk.get("id", f"chunk_{i}")
+            if "content" not in metadata:
+                metadata["content"] = chunk.get("content", "")
+            if "char_count" not in metadata:
+                metadata["char_count"] = chunk.get("char_count", 0)
+            if "token_count" not in metadata:
+                metadata["token_count"] = chunk.get("token_count", 0)
+            if "source" not in metadata:
+                metadata["source"] = chunk.get("source", "")
+            if "created_at" not in metadata:
+                metadata["created_at"] = chunk.get("created_at", "")
+            
+            metadatas.append(metadata)
+            # 处理ID，确保符合Qdrant的要求
+            chunk_id = chunk.get("id", f"chunk_{i}")
+            # 如果ID是数字字符串，转换为整数
+            try:
+                int_id = int(chunk_id)
+                if int_id >= 0:
+                    ids.append(int_id)
+                else:
+                    ids.append(chunk_id)  # 负数保持为字符串
+            except ValueError:
+                # 不是数字，保持为字符串
+                ids.append(chunk_id)
+        
+        # 插入稀疏向量
+        # 转换稀疏向量格式为Qdrant支持的格式
+        processed_vectors = []
+        for sparse_vector in sparse_vectors:
+            processed_vector = {}
+            
+            # 处理稠密向量 - 确保始终提供稠密向量
+            if "embedding" in sparse_vector:
+                processed_vector["dense"] = sparse_vector["embedding"]
+            elif "dense" in sparse_vector:
+                processed_vector["dense"] = sparse_vector["dense"]
+            else:
+                # 如果没有提供稠密向量，使用零向量
+                processed_vector["dense"] = [0.0] * vector_dimension
+            
+            # 处理稀疏向量
+            if "sparse_vector" in sparse_vector:
+                sparse_data = sparse_vector["sparse_vector"]
+                if "qdrant_format" in sparse_data:
+                    processed_vector["sparse_vector"] = sparse_data["qdrant_format"]
+                elif "indices" in sparse_data and "values" in sparse_data:
+                    processed_vector["sparse_vector"] = {
+                        "indices": sparse_data["indices"],
+                        "values": sparse_data["values"]
+                    }
+            elif "qdrant_format" in sparse_vector:
+                processed_vector["sparse_vector"] = sparse_vector["qdrant_format"]
+            elif "indices" in sparse_vector and "values" in sparse_vector:
+                processed_vector["sparse_vector"] = {
+                    "indices": sparse_vector["indices"],
+                    "values": sparse_vector["values"]
+                }
+            
+            processed_vectors.append(processed_vector)
+        
+        await vector_db_service.insert_vectors(
+            collection_name=request.kb_id,
+            vectors=processed_vectors,  # 这里已经是正确的格式
+            metadatas=metadatas,
+            ids=ids
+        )
+        
+        return JSONResponse(
+            content=success_response(
+                data={
+                    "kb_id": request.kb_id,
+                    "written_count": len(sparse_vectors),
+                    "status": "success"
+                },
+                message=f"成功写入 {len(sparse_vectors)} 个稀疏向量到 {kb.vector_db_type}"
+            )
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"稀疏向量索引写入失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"写入失败: {str(e)}")
+
+
+@router.post("/index/keyword/write", summary="写入关键词索引")
+async def write_keyword_index(request: WriteKeywordIndexRequest):
+    """
+    将分词结果写入关键词索引
+    
+    Returns:
+        写入结果
+    """
+    try:
+        # 获取知识库信息
+        from app.services.knowledge_base import KnowledgeBaseService
+        kb_service = KnowledgeBaseService()
+        kb = await kb_service.get_knowledge_base(request.kb_id)
+        
+        if not kb:
+            raise HTTPException(status_code=404, detail=f"知识库不存在: {request.kb_id}")
+        
+        # 获取知识库的schema配置
+        kb_schema = await kb_service.get_knowledge_base_schema(request.kb_id)
+        
         # TODO: 实现关键词索引写入
         # 1. 构建倒排索引
         # 2. 保存索引
         # 3. 返回结果
+        
+        # 准备数据
+        tokens_list = request.tokens_list
+        metadatas = []
+        ids = []
+        
+        # 获取schema定义的字段
+        schema_fields = kb_schema.get("fields", []) if kb_schema else []
+        field_names = [field["name"] for field in schema_fields]
+        
+        # 如果请求中指定了fields，则只处理这些字段
+        if request.fields:
+            field_names = [f for f in field_names if f in request.fields]
+        
+        for i, chunk in enumerate(request.chunks):
+            metadata: Dict[str, Any] = {
+                "kb_id": request.kb_id,
+            }
+            
+            # 根据schema定义添加字段
+            for field in schema_fields:
+                field_name = field["name"]
+                # 如果指定了要处理的字段，但当前字段不在其中，则跳过
+                if request.fields and field_name not in request.fields:
+                    continue
+                    
+                # 如果字段是关键词索引字段或稀疏向量索引字段，跳过（这些单独处理）
+                if field.get("isKeywordIndex") or field.get("isSparseVectorIndex"):
+                    continue
+                    
+                # 从chunk中获取字段值，如果不存在则使用默认值
+                if field_name in chunk:
+                    metadata[field_name] = chunk[field_name]
+                else:
+                    # 设置默认值
+                    field_type = field.get("type", "text")
+                    if field_type == "text":
+                        metadata[field_name] = ""
+                    elif field_type == "number":
+                        metadata[field_name] = 0
+                    elif field_type == "boolean":
+                        metadata[field_name] = False
+                    elif field_type == "array":
+                        metadata[field_name] = []
+                    elif field_type == "keyword":
+                        metadata[field_name] = ""
+                    else:
+                        metadata[field_name] = ""
+            
+            # 添加默认字段
+            if "chunk_id" not in metadata:
+                metadata["chunk_id"] = chunk.get("id", f"chunk_{i}")
+            if "content" not in metadata:
+                metadata["content"] = chunk.get("content", "")
+            if "char_count" not in metadata:
+                metadata["char_count"] = chunk.get("char_count", 0)
+            if "token_count" not in metadata:
+                metadata["token_count"] = chunk.get("token_count", 0)
+            if "source" not in metadata:
+                metadata["source"] = chunk.get("source", "")
+            if "created_at" not in metadata:
+                metadata["created_at"] = chunk.get("created_at", "")
+            
+            metadatas.append(metadata)
+            # 处理ID，确保符合Qdrant的要求
+            chunk_id = chunk.get("id", f"chunk_{i}")
+            # 如果ID是数字字符串，转换为整数
+            try:
+                int_id = int(chunk_id)
+                if int_id >= 0:
+                    ids.append(int_id)
+                else:
+                    ids.append(chunk_id)  # 负数保持为字符串
+            except ValueError:
+                # 不是数字，保持为字符串
+                ids.append(chunk_id)
         
         logger.warning("关键词索引写入功能待实现")
         
         return JSONResponse(
             content=success_response(
                 data={
-                    "kb_id": kb_id,
+                    "kb_id": request.kb_id,
                     "written_count": len(tokens_list),
                     "unique_tokens": len(set(token for tokens in tokens_list for token in tokens)),
                     "status": "pending_implementation"
@@ -486,6 +906,68 @@ async def hybrid_search(request: HybridSearchRequest):
         
     except Exception as e:
         logger.error(f"混合检索失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"检索失败: {str(e)}")
+
+
+# ========== Qdrant混合检索 ==========
+
+@router.post("/retrieve/qdrant-hybrid", summary="Qdrant原生混合检索")
+async def qdrant_hybrid_search(request: QdrantHybridSearchRequest):
+    """
+    执行Qdrant原生混合检索（稠密向量 + 稀疏向量）
+    
+    Returns:
+        检索结果
+    """
+    try:
+        # 1. 如果没有提供查询向量，则对查询进行向量化
+        query_vector = request.query_vector
+        if query_vector is None:
+            embedding_service = EmbeddingServiceFactory.create(
+                provider=EmbeddingProvider.OLLAMA,
+                model_name=request.embedding_model
+            )
+            query_vector = await embedding_service.embed_text(request.query)
+        
+        # 2. 如果没有提供稀疏向量且需要生成，则生成稀疏向量
+        query_sparse_vector = request.query_sparse_vector
+        if query_sparse_vector is None and request.generate_sparse_vector:
+            # TODO: 实现稀疏向量生成逻辑（例如使用SPLADE模型）
+            # 这里暂时保持为None，后续可以扩展 
+            pass
+        
+        # 3. 执行Qdrant原生混合检索
+        retrieval_service = RetrievalService()
+        results = await retrieval_service.qdrant_hybrid_search(
+            kb_id=request.kb_id,
+            query=request.query,
+            query_vector=query_vector,
+            query_sparse_vector=query_sparse_vector,
+            top_k=request.top_k,
+            score_threshold=request.score_threshold,
+            fusion=request.fusion
+        )
+        
+        # 转换为字典
+        results_data = [r.to_dict() for r in results]
+        
+        return JSONResponse(
+            content=success_response(
+                data={
+                    "query": request.query,
+                    "results": results_data,
+                    "config": {
+                        "top_k": request.top_k,
+                        "score_threshold": request.score_threshold,
+                        "fusion": request.fusion
+                    }
+                },
+                message=f"Qdrant混合检索完成: {len(results)} 个结果"
+            )
+        )
+        
+    except Exception as e:
+        logger.error(f"Qdrant混合检索失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"检索失败: {str(e)}")
 
 
@@ -740,3 +1222,72 @@ async def delete_debug_result(result_type: str, result_id: str):
         logger.error(f"删除调试结果失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 
+
+# ========== 稀疏向量生成 ==========
+
+@router.post("/sparse-vector/generate", summary="生成稀疏向量")
+async def generate_sparse_vector(request: SparseVectorRequest):
+    """
+    生成稀疏向量
+    
+    Returns:
+        稀疏向量和Qdrant格式
+    """
+    try:
+        # 创建检索服务
+        retrieval_service = RetrievalService()
+        
+        # 生成稀疏向量
+        sparse_vector = await retrieval_service.generate_sparse_vector(
+            kb_id=request.kb_id,
+            text=request.text,
+            method=request.method
+        )
+        
+        # 转换为Qdrant格式
+        indices, values = convert_sparse_vector_to_qdrant_format(sparse_vector)
+        
+        return JSONResponse(
+            content=success_response(
+                data={
+                    "sparse_vector": sparse_vector,
+                    "qdrant_format": {
+                        "indices": indices,
+                        "values": values
+                    },
+                    "sparsity": len(indices),  # 非零元素数量
+                    "total_tokens": len(sparse_vector)  # 总token数量
+                },
+                message=f"稀疏向量生成完成: {len(indices)} 个非零元素"
+            )
+        )
+        
+    except Exception as e:
+        logger.error(f"生成稀疏向量失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"生成失败: {str(e)}")
+
+
+# 添加转换函数
+def convert_sparse_vector_to_qdrant_format(
+    sparse_vector: Dict[str, float]
+) -> Tuple[List[int], List[float]]:
+    """
+    将稀疏向量转换为Qdrant格式
+    
+    Args:
+        sparse_vector: 稀疏向量 {token: weight}
+        
+    Returns:
+        (indices, values) 元组，Qdrant稀疏向量格式
+    """
+    indices = []
+    values = []
+    
+    # 使用token的hash值作为索引
+    for token, weight in sparse_vector.items():
+        if weight != 0:  # 只保留非零权重
+            token_id = abs(hash(token)) % (2**31)  # 确保是正整数
+            indices.append(token_id)
+            values.append(weight)
+    
+    return indices, values

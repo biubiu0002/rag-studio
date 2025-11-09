@@ -34,7 +34,7 @@ const MENU_ITEMS: MenuItem[] = [
       { id: "document-tokenization", label: "文档分词" },
       { id: "index-writing", label: "索引写入" },
       { id: "retrieval", label: "检索" },
-      { id: "generation", label: "生成" },
+      { id: "generation-test", label: "生成" },
     ],
   },
   {
@@ -42,8 +42,6 @@ const MENU_ITEMS: MenuItem[] = [
     label: "测试管理",
     children: [
       { id: "test-set", label: "测试集" },
-      { id: "retrieval-test", label: "检索测试" },
-      { id: "generation-test", label: "生成测试" },
       { id: "retriever-evaluation", label: "检索器评估" },
     ],
   },

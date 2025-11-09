@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Sidebar from "@/components/sidebar"
 import Header from "@/components/header"
 import KnowledgeBaseList from "@/components/views/knowledge-base-list"
@@ -9,7 +9,7 @@ import DocumentProcessing from "@/components/views/document-processing"
 import DocumentEmbeddingView from "@/components/views/document-embedding"
 import DocumentTokenizationView from "@/components/views/document-tokenization"
 import IndexWritingView from "@/components/views/index-writing"
-import RetrievalTestView from "@/components/views/retrieval-test"
+import RetrievalView from "@/components/views/retrieval"
 import GenerationTestView from "@/components/views/generation-test"
 import RetrieverEvaluationView from "@/components/views/retriever-evaluation"
 import Dashboard from "@/components/views/dashboard"
@@ -23,7 +23,7 @@ type ContentView =
   | "document-tokenization"
   | "index-writing"
   | "pipeline-debug"
-  | "retrieval-test"
+  | "retrieval"
   | "generation-test"
   | "retriever-evaluation"
 
@@ -31,10 +31,28 @@ export default function Home() {
   const [currentView, setCurrentView] = useState<ContentView>("dashboard")
   const [breadcrumbs, setBreadcrumbs] = useState(["Dashboard"])
 
-  const handleNavigate = (view: ContentView, path: string[]) => {
-    setCurrentView(view)
+  const handleNavigate = (view: string, path: string[]) => {
+    setCurrentView(view as ContentView)
     setBreadcrumbs(path)
   }
+
+  // 监听自定义导航事件
+  useEffect(() => {
+    const handleNavigation = (event: CustomEvent) => {
+      const { view, path } = event.detail
+      if (view) {
+        setCurrentView(view as ContentView)
+      }
+      if (path) {
+        setBreadcrumbs(path)
+      }
+    }
+
+    window.addEventListener('navigate', handleNavigation as EventListener)
+    return () => {
+      window.removeEventListener('navigate', handleNavigation as EventListener)
+    }
+  }, [])
 
   const renderContent = () => {
     switch (currentView) {
@@ -51,8 +69,8 @@ export default function Home() {
       case "index-writing":
         return <IndexWritingView />
 
-      case "retrieval-test":
-        return <RetrievalTestView />
+      case "retrieval":
+        return <RetrievalView />
       case "generation-test":
         return <GenerationTestView />
       case "retriever-evaluation":

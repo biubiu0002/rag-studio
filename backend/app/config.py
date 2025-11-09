@@ -6,6 +6,10 @@
 from typing import List
 from pydantic_settings import BaseSettings
 from pydantic import Field
+import os
+
+# 获取项目根目录 (backend目录)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class Settings(BaseSettings):
@@ -36,7 +40,7 @@ class Settings(BaseSettings):
     
     # 存储配置
     STORAGE_TYPE: str = Field(default="json", description="存储类型: json 或 mysql")
-    STORAGE_PATH: str = Field(default="./storage", description="JSON文件存储路径")
+    STORAGE_PATH: str = Field(default=os.path.join(PROJECT_ROOT, "storage"), description="JSON文件存储路径")
     
     # Ollama配置
     OLLAMA_BASE_URL: str = Field(default="http://localhost:11434", description="Ollama服务地址")

@@ -7,7 +7,7 @@ import { debugAPI } from "@/lib/api"
 import { knowledgeBaseAPI } from "@/lib/api"
 import { showToast } from "@/lib/toast"
 
-export default function RetrievalTestView() {
+export default function RetrievalView() {
   const [loading, setLoading] = useState(false)
   const [kbId, setKbId] = useState<string>("")
   const [knowledgeBases, setKnowledgeBases] = useState<any[]>([])
@@ -20,6 +20,10 @@ export default function RetrievalTestView() {
     rrf_k: 60,
     embedding_model: "bge-m3:latest",
     tokenize_mode: "search"
+  })
+  const [sparseVectorConfig, setSparseVectorConfig] = useState({
+    method: "bm25",
+    generate_sparse: false
   })
 
   // 加载知识库列表
@@ -62,6 +66,41 @@ export default function RetrievalTestView() {
         rrf_k: searchConfig.rrf_k,
         embedding_model: searchConfig.embedding_model,
         tokenize_mode: searchConfig.tokenize_mode
+      })
+      
+      setSearchResults(result.data)
+    } catch (error) {
+      console.error("检索失败:", error)
+      showToast("检索失败: " + (error as Error).message, "error")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // 执行Qdrant混合检索
+  const handleQdrantHybridSearch = async () => {
+    if (!searchQuery.trim()) {
+      showToast("请输入查询文本", "warning")
+      return
+    }
+    if (!kbId) {
+      showToast("请选择知识库", "warning")
+      return
+    }
+    
+    try {
+      setLoading(true)
+      
+      const result = await debugAPI.qdrantHybridSearch({
+        kb_id: kbId,
+        query: searchQuery,
+        top_k: searchConfig.top_k,
+        vector_weight: searchConfig.vector_weight,
+        keyword_weight: searchConfig.keyword_weight,
+        rrf_k: searchConfig.rrf_k,
+        embedding_model: searchConfig.embedding_model,
+        tokenize_mode: searchConfig.tokenize_mode,
+        sparse_vector_config: sparseVectorConfig
       })
       
       setSearchResults(result.data)
@@ -187,6 +226,37 @@ export default function RetrievalTestView() {
               </select>
             </div>
           </div>
+          
+          {/* 稀疏向量配置 */}
+          <div className="border-t pt-4">
+            <h3 className="text-sm font-medium mb-2">稀疏向量配置</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">稀疏向量算法</label>
+                <select
+                  value={sparseVectorConfig.method}
+                  onChange={(e) => setSparseVectorConfig({ ...sparseVectorConfig, method: e.target.value })}
+                  className="w-full p-2 border rounded"
+                >
+                  <option value="bm25">BM25</option>
+                  <option value="tf">词频(TF)</option>
+                  <option value="simple">简单词频</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">生成稀疏向量</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={sparseVectorConfig.generate_sparse}
+                    onChange={(e) => setSparseVectorConfig({ ...sparseVectorConfig, generate_sparse: e.target.checked })}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm">自动生成稀疏向量</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -206,13 +276,21 @@ export default function RetrievalTestView() {
             />
           </div>
 
-          <Button 
-            onClick={handleSearch} 
-            disabled={!searchQuery.trim() || !kbId || loading}
-            className="w-full"
-          >
-            {loading ? "检索中..." : "执行检索"}
-          </Button>
+          <div className="grid grid-cols-2 gap-4">
+            <Button 
+              onClick={handleSearch} 
+              disabled={!searchQuery.trim() || !kbId || loading}
+            >
+              {loading ? "检索中..." : "执行混合检索"}
+            </Button>
+            <Button 
+              onClick={handleQdrantHybridSearch} 
+              disabled={!searchQuery.trim() || !kbId || loading}
+              variant="outline"
+            >
+              {loading ? "检索中..." : "Qdrant混合检索"}
+            </Button>
+          </div>
 
           {/* 检索结果 */}
           {searchResults && (
