@@ -82,7 +82,7 @@ class SparseVectorRequest(BaseModel):
     """稀疏向量生成请求"""
     kb_id: str = Field(..., description="知识库ID")
     text: str = Field(..., description="输入文本")
-    method: str = Field("bm25", description="稀疏向量生成方法: bm25, tf-idf, splade")
+    method: str = Field("bm25", description="稀疏向量生成方法: bm25, tf-idf, simple, splade")
 
 
 # ========== 步骤1: 文档处理 ==========
@@ -1220,11 +1220,45 @@ async def qdrant_hybrid_search(request: QdrantHybridSearchRequest):
         # 2. 如果没有提供稀疏向量且需要生成，则生成稀疏向量
         query_sparse_vector = request.query_sparse_vector
         if query_sparse_vector is None and request.generate_sparse_vector:
-            # TODO: 实现稀疏向量生成逻辑（例如使用SPLADE模型）
-            # 这里暂时保持为None，后续可以扩展 
-            pass
+            # 获取知识库信息以确定稀疏向量生成方法
+            from app.services.knowledge_base import KnowledgeBaseService
+            kb_service = KnowledgeBaseService()
+            kb_schema = await kb_service.get_knowledge_base_schema(request.kb_id)
+            
+            # 确定稀疏向量生成方法
+            sparse_method = "bm25"  # 默认使用BM25
+            if kb_schema:
+                # 从知识库schema中找到稀疏向量字段及其配置的生成方法
+                for field in kb_schema.get("fields", []):
+                    if field.get("type") == "sparse_vector" and "sparseMethod" in field:
+                        sparse_method = field["sparseMethod"]
+                        break
+            
+            # 生成稀疏向量
+            try:
+                from app.services.retrieval_service import RetrievalService
+                retrieval_service = RetrievalService()
+                sparse_vector_dict = await retrieval_service.generate_sparse_vector(
+                    kb_id=request.kb_id,
+                    text=request.query,
+                    method=sparse_method
+                )
+                
+                # 转换为Qdrant格式
+                if sparse_vector_dict:
+                    from app.services.sparse_vector_service import convert_sparse_vector_to_qdrant_format
+                    indices, values = convert_sparse_vector_to_qdrant_format(sparse_vector_dict)
+                    query_sparse_vector = {
+                        "indices": indices,
+                        "values": values
+                    }
+            except Exception as e:
+                logger.warning(f"生成稀疏向量失败: {e}")
+                # 如果生成失败，继续使用None
         
         # 3. 执行Qdrant原生混合检索
+        # 确保在所有情况下都初始化retrieval_service
+        from app.services.retrieval_service import RetrievalService
         retrieval_service = RetrievalService()
         results = await retrieval_service.qdrant_hybrid_search(
             kb_id=request.kb_id,
@@ -1588,3 +1622,164 @@ def convert_sparse_vector_to_qdrant_format(
             values.append(weight)
     
     return indices, values
+
+
+# ========== 生成测试 ==========
+
+class GenerationRequest(BaseModel):
+    """生成请求"""
+    query: str = Field(..., description="查询问题")
+    context: Optional[str] = Field(None, description="上下文（可选，如果提供则直接使用）")
+    kb_id: Optional[str] = Field(None, description="知识库ID（如果需要自动检索上下文）")
+    stream: bool = Field(False, description="是否启用流式输出")
+    llm_provider: str = Field("ollama", description="LLM服务提供商")
+    llm_model: str = Field("deepseek-v3", description="LLM模型")
+    temperature: float = Field(0.7, description="生成参数：温度", ge=0, le=1)
+    max_tokens: Optional[int] = Field(None, description="最大生成token数")
+
+
+class GenerationResponse(BaseModel):
+    """生成响应"""
+    query: str = Field(..., description="查询问题")
+    context: Optional[str] = Field(None, description="使用的上下文")
+    answer: str = Field(..., description="生成的答案")
+    generation_time: float = Field(..., description="生成耗时(秒)")
+    llm_model: str = Field(..., description="使用的LLM模型")
+    tokens_used: Optional[int] = Field(None, description="消耗的token数")
+
+
+@router.post("/generate", summary="生成测试")
+async def generate(request: GenerationRequest):
+    """
+    基于上下文生成答案
+    
+    Args:
+        request: 生成请求
+    
+    Returns:
+        生成的答案
+    """
+    try:
+        import time
+        start_time = time.time()
+        
+        # 1. 获取上下文
+        context = request.context
+        if not context and request.kb_id:
+            # 需要自动检索上下文
+            logger.warning("自动检索上下文功能待实现，请手动提供上下文")
+        
+        # 2. 构建prompt - 分离prompt模板和内容
+        # 定义prompt模板
+        if context:
+            prompt_template = """基于以下上下文回答问题。如果上下文中没有相关信息，请说'信息不足'。
+
+上下文：
+{context}
+
+问题：{query}
+
+答案："""
+        else:
+            prompt_template = """请回答以下问题：
+
+问题：{query}
+
+答案："""
+        
+        # 填充模板
+        prompt = prompt_template.format(context=context or "", query=request.query)
+        
+        # 3. 调用LLM生成答案
+        answer = await call_llm(
+            prompt=prompt,
+            provider=request.llm_provider,
+            model=request.llm_model,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            stream=request.stream
+        )
+        
+        generation_time = time.time() - start_time
+        
+        return JSONResponse(
+            content=success_response(
+                data={
+                    "query": request.query,
+                    "context": context,
+                    "answer": answer,
+                    "prompt": prompt,  # 返回完整的prompt供调试
+                    "generation_time": generation_time,
+                    "llm_model": request.llm_model,
+                    "config": {
+                        "provider": request.llm_provider,
+                        "model": request.llm_model,
+                        "temperature": request.temperature,
+                        "max_tokens": request.max_tokens
+                    }
+                },
+                message="生成完成"
+            )
+        )
+        
+    except Exception as e:
+        logger.error(f"生成失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"生成失败: {str(e)}")
+
+
+async def call_llm(
+    prompt: str,
+    provider: str = "ollama",
+    model: str = "deepseek-v3",
+    temperature: float = 0.7,
+    max_tokens: Optional[int] = None,
+    stream: bool = False
+) -> str:
+    """
+    调用LLM生成答案
+    
+    Args:
+        prompt: 提示词
+        provider: LLM服务提供商 (ollama)
+        model: LLM模型
+        temperature: 生成参数
+        max_tokens: 最大token数
+        stream: 是否流式输出
+        
+    Returns:
+        生成的文本
+    """
+    try:
+        if provider == "ollama":
+            import httpx
+            
+            # 使用httpx调用Ollama API
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                payload = {
+                    "model": model,
+                    "prompt": prompt,
+                    "temperature": temperature,
+                    "stream": False  # 暂不支持流式
+                }
+                
+                if max_tokens:
+                    payload["num_predict"] = max_tokens
+                
+                response = await client.post(
+                    f"{settings.OLLAMA_BASE_URL}/api/generate",
+                    json=payload
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    return result.get("response", "")
+                else:
+                    logger.error(f"Ollama API请求失败: {response.status_code}")
+                    return "LLM调用失败"
+        else:
+            logger.warning(f"不支持的LLM提供商: {provider}")
+            return "不支持的LLM提供商"
+            
+    except Exception as e:
+        logger.error(f"调用LLM失败: {e}", exc_info=True)
+        raise

@@ -278,7 +278,7 @@ class SparseVectorServiceFactory:
         创建稀疏向量服务实例
         
         Args:
-            service_type: 服务类型 ('bm25', 'tf-idf', 'simple')
+            service_type: 服务类型 ('bm25', 'tf-idf', 'simple', 'splade')
             **kwargs: 其他参数
             
         Returns:
@@ -292,6 +292,10 @@ class SparseVectorServiceFactory:
         elif service_type == "tf-idf" or service_type == "tf":
             return TFSparseVectorService()
         elif service_type == "simple":
+            return SimpleSparseVectorService()
+        elif service_type == "splade":
+            # SPLADE暂时使用简单稀疏向量服务作为占位符
+            # 后续可以替换为真正的SPLADE模型实现
             return SimpleSparseVectorService()
         else:
             raise ValueError(f"不支持的稀疏向量服务类型: {service_type}")

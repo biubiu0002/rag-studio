@@ -5,6 +5,17 @@
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
 
+// ========== 通用类型 ==========
+
+export interface SavedResult {
+  id: string
+  name: string
+  type: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas' | 'sparse_vectors' | 'retrieval_results' | 'generation_results'
+  data: any
+  timestamp: number
+  metadata?: Record<string, any>
+}
+
 /**
  * 通用请求函数
  */
@@ -697,7 +708,7 @@ export const debugAPI = {
   generateSparseVector: async (data: {
     kb_id: string
     text: string
-    method?: "bm25" | "tf-idf" | "splade"
+    method?: "bm25" | "tf-idf" | "simple" | "splade"
   }) => {
     return request<{ success: boolean; data: any }>('/debug/sparse-vector/generate', {
       method: 'POST',
@@ -724,7 +735,7 @@ export const debugAPI = {
    */
   saveDebugResult: async (data: {
     name: string
-    type: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas' | 'sparse_vectors'
+    type: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas' | 'sparse_vectors' | 'retrieval_results' | 'generation_results'
     data: any
     metadata?: Record<string, any>
   }) => {
@@ -737,7 +748,7 @@ export const debugAPI = {
   /**
    * 列出调试结果
    */
-  listDebugResults: async (resultType: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas' | 'sparse_vectors') => {
+  listDebugResults: async (resultType: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas' | 'sparse_vectors' | 'retrieval_results' | 'generation_results') => {
     return request<{ success: boolean; data: Array<{ id: string; name: string; timestamp: number; metadata?: Record<string, any> }>; message: string }>(
       `/debug/result/list/${resultType}`
     )
@@ -746,7 +757,7 @@ export const debugAPI = {
   /**
    * 加载调试结果
    */
-  loadDebugResult: async (resultType: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas' | 'sparse_vectors', resultId: string) => {
+  loadDebugResult: async (resultType: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas' | 'sparse_vectors' | 'retrieval_results' | 'generation_results', resultId: string) => {
     return request<{ success: boolean; data: any; message: string }>(
       `/debug/result/load/${resultType}/${resultId}`
     )
@@ -755,12 +766,31 @@ export const debugAPI = {
   /**
    * 删除调试结果
    */
-  deleteDebugResult: async (resultType: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas' | 'sparse_vectors', resultId: string) => {
+  deleteDebugResult: async (resultType: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas' | 'sparse_vectors' | 'retrieval_results' | 'generation_results', resultId: string) => {
     return request<{ success: boolean; message: string }>(
       `/debug/result/delete/${resultType}/${resultId}`,
       {
         method: 'DELETE',
       }
     )
+  },
+
+  /**
+   * 生成测试
+   */
+  generate: async (data: {
+    query: string
+    context?: string
+    kb_id?: string
+    stream?: boolean
+    llm_provider?: string
+    llm_model?: string
+    temperature?: number
+    max_tokens?: number
+  }) => {
+    return request<{ success: boolean; data: any }>('/debug/generate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
   },
 }

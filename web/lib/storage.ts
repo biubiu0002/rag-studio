@@ -8,7 +8,7 @@ import { debugAPI } from './api'
 export interface SavedResult {
   id: string
   name: string
-  type: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas' | 'sparse_vectors'
+  type: 'chunks' | 'embeddings' | 'tokens' | 'index_data' | 'schemas' | 'sparse_vectors' | 'retrieval_results' | 'generation_results'
   data: any
   timestamp: number
   metadata?: Record<string, any>

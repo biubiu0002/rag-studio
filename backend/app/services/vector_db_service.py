@@ -17,9 +17,10 @@ try:
         VectorParams, Distance, PointStruct, 
         HnswConfigDiff, OptimizersConfigDiff,
         ScalarQuantization, ScalarQuantizationConfig, ScalarType,
-        ProductQuantization, ProductQuantizationConfig,
+        ProductQuantization, ProductQuantizationConfig, CompressionRatio,
         BinaryQuantization, BinaryQuantizationConfig,
-        QuantizationConfig as QdrantQuantizationConfig
+        QuantizationConfig as QdrantQuantizationConfig,
+        SparseVectorParams
     )
     QDRANT_AVAILABLE = True
 except ImportError:
@@ -334,7 +335,8 @@ class QdrantService(BaseVectorDBService):
                 # 获取HNSW配置
                 hnsw_config = field.get("hnsw", {})
                 hnsw_config_diff = None
-                if hnsw_config:
+                if hnsw_config and QDRANT_AVAILABLE:
+                    from qdrant_client.models import HnswConfigDiff
                     hnsw_config_diff = HnswConfigDiff(
                         m=hnsw_config.get("m", 16),
                         ef_construct=hnsw_config.get("ef_construct", 100),
@@ -345,7 +347,13 @@ class QdrantService(BaseVectorDBService):
                 # 获取量化配置
                 quantization_config = field.get("quantization")
                 qdrant_quantization = None
-                if quantization_config and quantization_config.get("type"):
+                if quantization_config and quantization_config.get("type") and QDRANT_AVAILABLE:
+                    from qdrant_client.models import (
+                        ScalarQuantization, ScalarQuantizationConfig, ScalarType,
+                        ProductQuantization, ProductQuantizationConfig, CompressionRatio,
+                        BinaryQuantization, BinaryQuantizationConfig
+                    )
+                    
                     quant_type = quantization_config["type"]
                     always_ram = quantization_config.get("always_ram", False)
                     
@@ -359,7 +367,7 @@ class QdrantService(BaseVectorDBService):
                     elif quant_type == "product":
                         qdrant_quantization = ProductQuantization(
                             product=ProductQuantizationConfig(
-                                compression=16,  # 默认压缩比
+                                compression=CompressionRatio.X16,  # 使用正确的枚举值
                                 always_ram=always_ram
                             )
                         )
@@ -374,13 +382,22 @@ class QdrantService(BaseVectorDBService):
                 on_disk = field.get("on_disk", False)
                 
                 # 创建向量参数
-                vector_params = VectorParams(
-                    size=field_dimension,
-                    distance=distance,
-                    hnsw_config=hnsw_config_diff,
-                    quantization_config=qdrant_quantization,
-                    on_disk=on_disk
-                )
+                if QDRANT_AVAILABLE:
+                    from qdrant_client.models import VectorParams, Distance
+                    vector_params = VectorParams(
+                        size=field_dimension,
+                        distance=distance,
+                        hnsw_config=hnsw_config_diff,
+                        quantization_config=qdrant_quantization,
+                        on_disk=on_disk
+                    )
+                else:
+                    # 如果Qdrant不可用，使用基本配置
+                    vector_params = {
+                        "size": field_dimension,
+                        "distance": str(distance) if hasattr(distance, 'value') else str(distance),
+                        "on_disk": on_disk
+                    }
                 
                 vectors_config[field_name] = vector_params
                 has_named_vectors = True
@@ -662,7 +679,7 @@ class QdrantService(BaseVectorDBService):
             检索结果列表
         """
         try:
-            from qdrant_client.models import Fusion, Prefetch
+            from qdrant_client.http.models import Fusion, Prefetch
         except ImportError:
             # 如果Qdrant客户端版本不支持混合检索，回退到普通向量检索
             return await self.search(collection_name, query_vector, top_k, score_threshold, dense_vector_name)
@@ -696,7 +713,7 @@ class QdrantService(BaseVectorDBService):
         # 如果提供了稀疏向量，添加稀疏向量预取查询
         if query_sparse_vector and "indices" in query_sparse_vector and "values" in query_sparse_vector:
             try:
-                from qdrant_client.models import SparseVector
+                from qdrant_client.http.models import SparseVector
                 sparse_vector = SparseVector(
                     indices=query_sparse_vector["indices"],
                     values=query_sparse_vector["values"]
@@ -715,12 +732,14 @@ class QdrantService(BaseVectorDBService):
         # 执行混合检索
         try:
             # 根据融合方法选择相应的Fusion类型
+            from qdrant_client.http.models import FusionQuery
             fusion_type = Fusion.RRF if fusion.lower() == "rrf" else Fusion.DBSF
+            fusion_query = FusionQuery(fusion=fusion_type)
             
             search_result = self.client.query_points(
                 collection_name=collection_name,
                 prefetch=prefetch,
-                query=fusion_type,
+                query=fusion_query,  # 使用FusionQuery对象
                 limit=top_k,
                 score_threshold=score_threshold
             )

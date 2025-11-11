@@ -270,11 +270,11 @@ export default function IndexWritingView() {
           
           try {
             // 获取稀疏向量生成方法
-            let method: "bm25" | "tf-idf" | "splade" = "bm25"
+            let method: "bm25" | "tf-idf" | "simple" | "splade" = "bm25"
             if (selectedKbSchema && selectedKbSchema.fields) {
               const sparseField = selectedKbSchema.fields.find((field: any) => field.type === "sparse_vector")
               if (sparseField && sparseField.sparseMethod) {
-                method = sparseField.sparseMethod as "bm25" | "tf-idf" | "splade"
+                method = sparseField.sparseMethod as "bm25" | "tf-idf" | "simple" | "splade"
               }
             }
             

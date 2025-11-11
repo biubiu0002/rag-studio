@@ -37,6 +37,9 @@ type FieldType =
 // Qdrant距离度量类型
 type DistanceMetric = "Cosine" | "Euclid" | "Dot" | "Manhattan"
 
+// 稀疏向量生成方法类型
+type SparseMethod = "bm25" | "tf-idf" | "simple" | "splade"
+
 // HNSW索引配置
 interface HNSWConfig {
   m?: number // 连接数，默认16
@@ -61,7 +64,7 @@ interface SchemaField {
   dimension?: number // 用于向量字段
   description?: string // 字段描述
   // 添加稀疏向量特定属性
-  sparseMethod?: "bm25" | "tf-idf" | "splade" // 稀疏向量生成方法
+  sparseMethod?: SparseMethod // 稀疏向量生成方法
   // Qdrant向量配置
   distance?: DistanceMetric // 距离度量类型
   hnsw?: HNSWConfig // HNSW索引配置
@@ -1312,7 +1315,7 @@ export default function KnowledgeBaseConfig() {
                       </label>
                       <Select
                         value={editingField.sparseMethod || "bm25"}
-                        onValueChange={(value: "bm25" | "tf-idf" | "splade") =>
+                        onValueChange={(value: "bm25" | "tf-idf" | "simple" | "splade") =>
                           setEditingField({ 
                             ...editingField, 
                             sparseMethod: value
@@ -1325,6 +1328,7 @@ export default function KnowledgeBaseConfig() {
                         <SelectContent>
                           <SelectItem value="bm25">BM25</SelectItem>
                           <SelectItem value="tf-idf">TF-IDF</SelectItem>
+                          <SelectItem value="simple">简单词频</SelectItem>
                           <SelectItem value="splade">SPLADE</SelectItem>
                         </SelectContent>
                       </Select>

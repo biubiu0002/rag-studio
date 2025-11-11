@@ -1,11 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { debugAPI } from "@/lib/api"
 import { knowledgeBaseAPI } from "@/lib/api"
 import { showToast } from "@/lib/toast"
+import { saveResultToStorage, listResultsByType, loadResultFromStorage, exportResultToFile, importResultFromFile, SavedResult } from "@/lib/storage"
 
 export default function RetrievalView() {
   const [loading, setLoading] = useState(false)
@@ -22,13 +23,18 @@ export default function RetrievalView() {
     tokenize_mode: "search"
   })
   const [sparseVectorConfig, setSparseVectorConfig] = useState({
-    method: "bm25",
+    method: "bm25" as "bm25" | "tf" | "simple" | "splade",
     generate_sparse: false
   })
+  const [savedResults, setSavedResults] = useState<SavedResult[]>([])
+  const [selectedResultId, setSelectedResultId] = useState<string>("")
+  const [saveName, setSaveName] = useState<string>("")  
+  const jsonFileInputRef = useRef<HTMLInputElement>(null)
 
   // 加载知识库列表
   useEffect(() => {
     loadKnowledgeBases()
+    loadSavedResults()
   }, [])
 
   const loadKnowledgeBases = async () => {
@@ -40,6 +46,15 @@ export default function RetrievalView() {
       }
     } catch (error) {
       console.error("加载知识库列表失败:", error)
+    }
+  }
+
+  const loadSavedResults = async () => {
+    try {
+      const results = await listResultsByType('retrieval_results')
+      setSavedResults(results)
+    } catch (error) {
+      console.error("加载已保存结果失败:", error)
     }
   }
 
@@ -95,12 +110,8 @@ export default function RetrievalView() {
         kb_id: kbId,
         query: searchQuery,
         top_k: searchConfig.top_k,
-        vector_weight: searchConfig.vector_weight,
-        keyword_weight: searchConfig.keyword_weight,
-        rrf_k: searchConfig.rrf_k,
         embedding_model: searchConfig.embedding_model,
-        tokenize_mode: searchConfig.tokenize_mode,
-        sparse_vector_config: sparseVectorConfig
+        generate_sparse_vector: sparseVectorConfig.generate_sparse
       })
       
       setSearchResults(result.data)
@@ -109,6 +120,123 @@ export default function RetrievalView() {
       showToast("检索失败: " + (error as Error).message, "error")
     } finally {
       setLoading(false)
+    }
+  }
+
+  // 保存检索结果
+  const handleSaveResults = async () => {
+    if (!searchResults) {
+      showToast("没有可保存的检索结果", "warning")
+      return
+    }
+    
+    try {
+      const name = saveName.trim() || `检索结果_${new Date().toLocaleString()}`
+      const id = await saveResultToStorage({
+        name,
+        type: 'retrieval_results',
+        data: {
+          results: searchResults,
+          query: searchQuery,
+          config: searchConfig,
+          kb_id: kbId
+        },
+        metadata: {
+          result_count: searchResults.results?.length || 0,
+          kb_id: kbId
+        }
+      })
+      
+      showToast(`保存成功！ID: ${id}`, "success")
+      setSaveName("")
+      await loadSavedResults()
+    } catch (error) {
+      showToast("保存失败: " + (error as Error).message, "error")
+    }
+  }
+
+  // 加载已保存的检索结果
+  const handleLoadResults = async () => {
+    if (!selectedResultId) {
+      showToast("请选择要加载的结果", "warning")
+      return
+    }
+    
+    try {
+      const result = await loadResultFromStorage('retrieval_results', selectedResultId)
+      if (!result || result.type !== 'retrieval_results') {
+        showToast("加载失败：无效的结果", "error")
+        return
+      }
+      
+      setSearchResults(result.data.results || result.data)
+      setSearchQuery(result.data.query || "")
+      if (result.data.config) {
+        setSearchConfig(result.data.config)
+      }
+      if (result.data.kb_id) {
+        setKbId(result.data.kb_id)
+      }
+      
+      showToast(`加载成功！${result.name}`, "success")
+    } catch (error) {
+      showToast("加载失败: " + (error as Error).message, "error")
+    }
+  }
+
+  // 导出JSON文件
+  const handleExportResults = () => {
+    if (!searchResults) {
+      showToast("没有可导出的结果", "warning")
+      return
+    }
+    
+    const result: SavedResult = {
+      id: '',
+      name: saveName.trim() || `检索结果_${new Date().toLocaleString()}`,
+      type: 'retrieval_results',
+      data: {
+        results: searchResults,
+        query: searchQuery,
+        config: searchConfig,
+        kb_id: kbId
+      },
+      timestamp: Date.now(),
+      metadata: {
+        result_count: searchResults.results?.length || 0,
+        kb_id: kbId
+      }
+    }
+    
+    exportResultToFile(result)
+  }
+
+  // 导入JSON文件
+  const handleImportJson = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    
+    try {
+      const result = await importResultFromFile(file)
+      if (result.type === 'retrieval_results') {
+        setSearchResults(result.data.results || result.data)
+        setSearchQuery(result.data.query || "")
+        if (result.data.config) {
+          setSearchConfig(result.data.config)
+        }
+        if (result.data.kb_id) {
+          setKbId(result.data.kb_id)
+        }
+        showToast(`导入成功！${result.name}`, "success")
+      } else {
+        showToast("文件类型不匹配，需要retrieval_results类型", "error")
+      }
+    } catch (error) {
+      showToast("导入失败: " + (error as Error).message, "error")
+    } finally {
+      if (jsonFileInputRef.current) {
+        jsonFileInputRef.current.value = ''
+      }
     }
   }
 
@@ -235,12 +363,13 @@ export default function RetrievalView() {
                 <label className="block text-sm font-medium mb-2">稀疏向量算法</label>
                 <select
                   value={sparseVectorConfig.method}
-                  onChange={(e) => setSparseVectorConfig({ ...sparseVectorConfig, method: e.target.value })}
+                  onChange={(e) => setSparseVectorConfig({ ...sparseVectorConfig, method: e.target.value as "bm25" | "tf" | "simple" | "splade" })}
                   className="w-full p-2 border rounded"
                 >
                   <option value="bm25">BM25</option>
-                  <option value="tf">词频(TF)</option>
+                  <option value="tf">TF-IDF</option>
                   <option value="simple">简单词频</option>
+                  <option value="splade">SPLADE</option>
                 </select>
               </div>
               <div>
@@ -325,6 +454,76 @@ export default function RetrievalView() {
               </div>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>步骤4: 保存/加载检索结果</CardTitle>
+          <CardDescription>保存当前检索结果供后续使用或加载已保存的结果</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* 保存当前结果 */}
+          {searchResults && (
+            <div className="border-b pb-4">
+              <h3 className="text-sm font-medium mb-2">保存当前结果</h3>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={saveName}
+                  onChange={(e) => setSaveName(e.target.value)}
+                  placeholder="输入保存名称（可选）"
+                  className="flex-1 p-2 border rounded text-sm"
+                />
+                <Button onClick={handleSaveResults} variant="outline" size="sm">
+                  保存到本地
+                </Button>
+                <Button onClick={handleExportResults} variant="outline" size="sm">
+                  导出JSON
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* 加载已保存的结果 */}
+          <div>
+            <label className="block text-sm font-medium mb-2">从已保存结果加载</label>
+            <div className="flex gap-2">
+              <select
+                value={selectedResultId}
+                onChange={(e) => setSelectedResultId(e.target.value)}
+                className="flex-1 p-2 border rounded text-sm"
+              >
+                <option value="">选择已保存的检索结果...</option>
+                {savedResults.map((result) => (
+                  <option key={result.id} value={result.id}>
+                    {result.name} ({new Date(result.timestamp).toLocaleString()}) - {result.metadata?.result_count || 0}个结果
+                  </option>
+                ))}
+              </select>
+              <Button onClick={handleLoadResults} disabled={!selectedResultId} variant="outline" size="sm">
+                加载
+              </Button>
+              <Button onClick={loadSavedResults} variant="outline" size="sm">
+                刷新
+              </Button>
+            </div>
+          </div>
+
+          {/* 从JSON文件导入 */}
+          <div>
+            <label className="block text-sm font-medium mb-2">从JSON文件导入</label>
+            <input
+              ref={jsonFileInputRef}
+              type="file"
+              accept=".json"
+              onChange={handleImportJson}
+              className="hidden"
+            />
+            <Button onClick={() => jsonFileInputRef.current?.click()} variant="outline" className="w-full" size="sm">
+              选择JSON文件导入
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>

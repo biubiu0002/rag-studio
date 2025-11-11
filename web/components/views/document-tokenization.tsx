@@ -25,7 +25,7 @@ export default function DocumentTokenizationView() {
   const [sparseVectors, setSparseVectors] = useState<any[]>([])
   const [sparseVectorPreview, setSparseVectorPreview] = useState<any[]>([])
   const [sparseVectorConfig, setSparseVectorConfig] = useState({
-    method: "bm25"
+    method: "bm25" as "bm25" | "tf-idf" | "simple" | "splade"
   })
   const [savedSparseVectors, setSavedSparseVectors] = useState<SavedResult[]>([])
   const [selectedSparseVectorId, setSelectedSparseVectorId] = useState<string>("")
@@ -101,8 +101,8 @@ export default function DocumentTokenizationView() {
       
       // 并行调用API生成稀疏向量（处理所有分块）
       const method = sparseVectorConfig.method === "bm25" ? "bm25" : 
-                     sparseVectorConfig.method === "tf" ? "tf-idf" : 
-                     "splade"
+                     sparseVectorConfig.method === "tf-idf" ? "tf-idf" : 
+                     sparseVectorConfig.method
       
       // 分批处理，避免一次发起太多请求
       const BATCH_SIZE = 10  // 每批10个并发请求
@@ -566,16 +566,18 @@ export default function DocumentTokenizationView() {
                 <label className="block text-sm font-medium mb-2">生成方法</label>
                 <select
                   value={sparseVectorConfig.method}
-                  onChange={(e) => setSparseVectorConfig({ ...sparseVectorConfig, method: e.target.value })}
+                  onChange={(e) => setSparseVectorConfig({ ...sparseVectorConfig, method: e.target.value as "bm25" | "tf-idf" | "simple" | "splade" })}
                   className="w-full p-2 border rounded"
                 >
                   <option value="bm25">BM25</option>
-                  <option value="tf">TF-IDF</option>
+                  <option value="tf-idf">TF-IDF</option>
+                  <option value="simple">简单词频</option>
                   <option value="splade">SPLADE</option>
                 </select>
                 <div className="text-xs text-gray-500 mt-1">
                   {sparseVectorConfig.method === "bm25" && "基于BM25算法的稀疏向量"}
-                  {sparseVectorConfig.method === "tf" && "基于TF-IDF算法的稀疏向量"}
+                  {sparseVectorConfig.method === "tf-idf" && "基于TF-IDF算法的稀疏向量"}
+                  {sparseVectorConfig.method === "simple" && "基于简单词频的稀疏向量"}
                   {sparseVectorConfig.method === "splade" && "基于SPLADE模型的稀疏向量"}
                 </div>
               </div>

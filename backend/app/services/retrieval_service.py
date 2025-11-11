@@ -639,7 +639,7 @@ class RetrievalService:
         Args:
             kb_id: 知识库ID
             text: 输入文本
-            method: 稀疏向量生成方法 ('bm25', 'tf-idf', 'simple')
+            method: 稀疏向量生成方法 ('bm25', 'tf-idf', 'simple', 'splade')
             
         Returns:
             稀疏向量 {token: weight}
