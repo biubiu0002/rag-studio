@@ -77,7 +77,20 @@ def migrate_knowledge_bases():
                     "vector_db_type": kb_data.get("vector_db_type", "qdrant"),
                     "fields": [
                         {"name": "content", "type": "text", "isIndexed": True, "isVectorIndex": False},
-                        {"name": "embedding", "type": "array", "isIndexed": True, "isVectorIndex": True}
+                        {
+                            "name": "embedding", 
+                            "type": "dense_vector", 
+                            "isIndexed": True, 
+                            "isVectorIndex": True,
+                            "dimension": 1024,
+                            "distance": "Cosine",
+                            "hnsw": {
+                                "m": 16,
+                                "ef_construct": 100,
+                                "full_scan_threshold": 10000,
+                                "on_disk": False
+                            }
+                        }
                     ]
                 }
             },

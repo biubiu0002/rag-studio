@@ -390,6 +390,15 @@ class WriteSparseVectorIndexRequest(BaseModel):
     fields: Optional[List[str]] = Field(None, description="要写入的字段列表")
 
 
+class WriteHybridIndexRequest(BaseModel):
+    """写入混合索引请求（同时支持稠密向量和稀疏向量）"""
+    kb_id: str = Field(..., description="知识库ID")
+    chunks: List[Dict[str, Any]] = Field(..., description="分块数据列表")
+    dense_vectors: Optional[List[List[float]]] = Field(None, description="稠密向量列表")
+    sparse_vectors: Optional[List[Dict[str, Any]]] = Field(None, description="稀疏向量列表，每个元素包含indices和values")
+    fields: Optional[List[str]] = Field(None, description="要写入的字段列表")
+
+
 @router.post("/index/vector/write", summary="写入向量索引")
 async def write_vector_index(request: WriteVectorIndexRequest):
     """
@@ -413,14 +422,17 @@ async def write_vector_index(request: WriteVectorIndexRequest):
         # 获取向量数据库服务
         from app.services.vector_db_service import VectorDBServiceFactory
         from app.models.knowledge_base import VectorDBType
-        vector_db_service = VectorDBServiceFactory.create(VectorDBType(kb.vector_db_type))
+        vector_db_service = VectorDBServiceFactory.create(
+            VectorDBType(kb.vector_db_type),
+            config=kb.vector_db_config if kb.vector_db_config else None
+        )
         
         # 创建集合（如果不存在）
         vector_dimension = kb.embedding_dimension
         # 如果schema中指定了维度，则使用schema中的维度
         if kb_schema:
             for field in kb_schema.get("fields", []):
-                if field.get("isVectorIndex") and "dimension" in field:
+                if field.get("type") == "dense_vector" and "dimension" in field:
                     vector_dimension = field["dimension"]
                     break
         
@@ -432,11 +444,18 @@ async def write_vector_index(request: WriteVectorIndexRequest):
                 # 更新维度配置以匹配实际向量维度
                 vector_dimension = actual_dimension
         
-        await vector_db_service.create_collection(
-            collection_name=request.kb_id,
-            dimension=vector_dimension,
-            schema_fields=kb_schema.get("fields", []) if kb_schema else []
-        )
+        # 创建集合（如果不存在）- 使用 try-except 处理已存在的情况
+        try:
+            await vector_db_service.create_collection(
+                collection_name=request.kb_id,
+                dimension=vector_dimension,
+                schema_fields=kb_schema.get("fields", []) if kb_schema else []
+            )
+        except Exception as e:
+            # 如果集合已存在，忽略错误继续；其他错误则记录日志
+            if "already exists" not in str(e).lower():
+                logger.warning(f"创建集合时发生错误: {e}")
+            # 集合已存在，继续后续操作
         
         # 准备数据
         vectors = request.vectors
@@ -463,8 +482,8 @@ async def write_vector_index(request: WriteVectorIndexRequest):
                 if request.fields and field_name not in request.fields:
                     continue
                     
-                # 如果字段是向量索引字段，跳过（向量单独处理）
-                if field.get("isVectorIndex"):
+                # 如果字段是向量字段，跳过（向量单独处理）
+                if field.get("type") in ["dense_vector", "sparse_vector"]:
                     continue
                     
                 # 从chunk中获取字段值，如果不存在则使用默认值
@@ -475,12 +494,12 @@ async def write_vector_index(request: WriteVectorIndexRequest):
                     field_type = field.get("type", "text")
                     if field_type == "text":
                         metadata[field_name] = ""
-                    elif field_type == "number":
+                    elif field_type == "integer":
                         metadata[field_name] = 0
+                    elif field_type == "float":
+                        metadata[field_name] = 0.0
                     elif field_type == "boolean":
                         metadata[field_name] = False
-                    elif field_type == "array":
-                        metadata[field_name] = []
                     elif field_type == "keyword":
                         metadata[field_name] = ""
                     else:
@@ -524,9 +543,28 @@ async def write_vector_index(request: WriteVectorIndexRequest):
                 vector_dimension = actual_dimension
         
         # 转换向量格式以匹配insert_vectors方法的签名
+        # 根据schema确定向量字段名称
+        vector_field_name = "dense"  # 默认使用"dense"
+        for field in schema_fields:
+            if field.get("type") == "dense_vector":
+                vector_field_name = field.get("name", "dense")
+                break
+        
+        # 检查是否使用命名向量（如果有稀疏向量或多个稠密向量字段）
+        has_sparse_vectors = any(
+            field.get("type") == "sparse_vector"
+            for field in schema_fields
+        )
+        dense_vector_count = len([f for f in schema_fields if f.get("type") == "dense_vector"])
+        
         processed_vectors: List[Union[List[float], Dict[str, Any]]] = []  # type: ignore
         for vector in vectors:
-            processed_vectors.append(vector)
+            if has_sparse_vectors or dense_vector_count > 1:
+                # 使用命名向量格式
+                processed_vectors.append({vector_field_name: vector})
+            else:
+                # 使用简单向量格式
+                processed_vectors.append(vector)
         
         await vector_db_service.insert_vectors(
             collection_name=request.kb_id,
@@ -576,22 +614,32 @@ async def write_sparse_vector_index(request: WriteSparseVectorIndexRequest):
         # 获取向量数据库服务
         from app.services.vector_db_service import VectorDBServiceFactory
         from app.models.knowledge_base import VectorDBType
-        vector_db_service = VectorDBServiceFactory.create(VectorDBType(kb.vector_db_type))
+        vector_db_service = VectorDBServiceFactory.create(
+            VectorDBType(kb.vector_db_type),
+            config=kb.vector_db_config if kb.vector_db_config else None
+        )
         
         # 创建集合（如果不存在）
         vector_dimension = kb.embedding_dimension
         # 如果schema中指定了维度，则使用schema中的维度
         if kb_schema:
             for field in kb_schema.get("fields", []):
-                if field.get("isVectorIndex") and "dimension" in field:
+                if field.get("type") == "dense_vector" and "dimension" in field:
                     vector_dimension = field["dimension"]
                     break
         
-        await vector_db_service.create_collection(
-            collection_name=request.kb_id,
-            dimension=vector_dimension,
-            schema_fields=kb_schema.get("fields", []) if kb_schema else []
-        )
+        # 创建集合（如果不存在）- 使用 try-except 处理已存在的情况
+        try:
+            await vector_db_service.create_collection(
+                collection_name=request.kb_id,
+                dimension=vector_dimension,
+                schema_fields=kb_schema.get("fields", []) if kb_schema else []
+            )
+        except Exception as e:
+            # 如果集合已存在，忽略错误继续；其他错误则记录日志
+            if "already exists" not in str(e).lower():
+                logger.warning(f"创建集合时发生错误: {e}")
+            # 集合已存在，继续后续操作
         
         # 准备数据
         sparse_vectors = request.sparse_vectors
@@ -618,8 +666,8 @@ async def write_sparse_vector_index(request: WriteSparseVectorIndexRequest):
                 if request.fields and field_name not in request.fields:
                     continue
                     
-                # 如果字段是向量索引字段，跳过（向量单独处理）
-                if field.get("isVectorIndex"):
+                # 如果字段是向量字段，跳过（向量单独处理）
+                if field.get("type") in ["dense_vector", "sparse_vector"]:
                     continue
                     
                 # 从chunk中获取字段值，如果不存在则使用默认值
@@ -630,12 +678,12 @@ async def write_sparse_vector_index(request: WriteSparseVectorIndexRequest):
                     field_type = field.get("type", "text")
                     if field_type == "text":
                         metadata[field_name] = ""
-                    elif field_type == "number":
+                    elif field_type == "integer":
                         metadata[field_name] = 0
+                    elif field_type == "float":
+                        metadata[field_name] = 0.0
                     elif field_type == "boolean":
                         metadata[field_name] = False
-                    elif field_type == "array":
-                        metadata[field_name] = []
                     elif field_type == "keyword":
                         metadata[field_name] = ""
                     else:
@@ -671,33 +719,45 @@ async def write_sparse_vector_index(request: WriteSparseVectorIndexRequest):
         
         # 插入稀疏向量
         # 转换稀疏向量格式为Qdrant支持的格式
+        # 根据schema确定向量字段名称
+        dense_field_name = "dense"
+        sparse_field_name = "sparse_vector"
+        
+        for field in schema_fields:
+            if field.get("type") == "dense_vector":
+                dense_field_name = field.get("name", "dense")
+            elif field.get("type") == "sparse_vector":
+                sparse_field_name = field.get("name", "sparse_vector")
+        
         processed_vectors = []
         for sparse_vector in sparse_vectors:
             processed_vector = {}
             
             # 处理稠密向量 - 确保始终提供稠密向量
             if "embedding" in sparse_vector:
-                processed_vector["dense"] = sparse_vector["embedding"]
+                processed_vector[dense_field_name] = sparse_vector["embedding"]
             elif "dense" in sparse_vector:
-                processed_vector["dense"] = sparse_vector["dense"]
+                processed_vector[dense_field_name] = sparse_vector["dense"]
+            elif dense_field_name in sparse_vector:
+                processed_vector[dense_field_name] = sparse_vector[dense_field_name]
             else:
                 # 如果没有提供稠密向量，使用零向量
-                processed_vector["dense"] = [0.0] * vector_dimension
+                processed_vector[dense_field_name] = [0.0] * vector_dimension
             
             # 处理稀疏向量
             if "sparse_vector" in sparse_vector:
                 sparse_data = sparse_vector["sparse_vector"]
                 if "qdrant_format" in sparse_data:
-                    processed_vector["sparse_vector"] = sparse_data["qdrant_format"]
+                    processed_vector[sparse_field_name] = sparse_data["qdrant_format"]
                 elif "indices" in sparse_data and "values" in sparse_data:
-                    processed_vector["sparse_vector"] = {
+                    processed_vector[sparse_field_name] = {
                         "indices": sparse_data["indices"],
                         "values": sparse_data["values"]
                     }
             elif "qdrant_format" in sparse_vector:
-                processed_vector["sparse_vector"] = sparse_vector["qdrant_format"]
+                processed_vector[sparse_field_name] = sparse_vector["qdrant_format"]
             elif "indices" in sparse_vector and "values" in sparse_vector:
-                processed_vector["sparse_vector"] = {
+                processed_vector[sparse_field_name] = {
                     "indices": sparse_vector["indices"],
                     "values": sparse_vector["values"]
                 }
@@ -726,6 +786,234 @@ async def write_sparse_vector_index(request: WriteSparseVectorIndexRequest):
         raise
     except Exception as e:
         logger.error(f"稀疏向量索引写入失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"写入失败: {str(e)}")
+
+
+@router.post("/index/hybrid/write", summary="写入混合索引（稠密+稀疏向量）")
+async def write_hybrid_index(request: WriteHybridIndexRequest):
+    """
+    一次性写入稠密向量和/或稀疏向量到向量数据库
+    每个point同时包含稠密向量和稀疏向量
+    
+    Returns:
+        写入结果
+    """
+    try:
+        # 验证至少提供了一种向量
+        if not request.dense_vectors and not request.sparse_vectors:
+            raise HTTPException(status_code=400, detail="必须提供dense_vectors或sparse_vectors中的至少一种")
+        
+        # 获取知识库信息
+        from app.services.knowledge_base import KnowledgeBaseService
+        kb_service = KnowledgeBaseService()
+        kb = await kb_service.get_knowledge_base(request.kb_id)
+        
+        if not kb:
+            raise HTTPException(status_code=404, detail=f"知识库不存在: {request.kb_id}")
+        
+        # 获取知识库的schema配置
+        kb_schema = await kb_service.get_knowledge_base_schema(request.kb_id)
+        
+        # 获取向量数据库服务
+        from app.services.vector_db_service import VectorDBServiceFactory
+        from app.models.knowledge_base import VectorDBType
+        vector_db_service = VectorDBServiceFactory.create(
+            VectorDBType(kb.vector_db_type),
+            config=kb.vector_db_config if kb.vector_db_config else None
+        )
+        
+        # 创建集合（如果不存在）
+        vector_dimension = kb.embedding_dimension
+        # 如果schema中指定了维度，则使用schema中的维度
+        if kb_schema:
+            for field in kb_schema.get("fields", []):
+                if field.get("type") == "dense_vector" and "dimension" in field:
+                    vector_dimension = field["dimension"]
+                    break
+        
+        # 验证向量维度是否与传入的向量一致
+        if request.dense_vectors and len(request.dense_vectors) > 0:
+            actual_dimension = len(request.dense_vectors[0])
+            if actual_dimension != vector_dimension:
+                logger.warning(f"向量维度不匹配: 配置维度 {vector_dimension}, 实际维度 {actual_dimension}")
+                vector_dimension = actual_dimension
+        
+        # 创建集合（如果不存在）
+        try:
+            await vector_db_service.create_collection(
+                collection_name=request.kb_id,
+                dimension=vector_dimension,
+                schema_fields=kb_schema.get("fields", []) if kb_schema else []
+            )
+        except Exception as e:
+            if "already exists" not in str(e).lower():
+                logger.warning(f"创建集合时发生错误: {e}")
+        
+        # 获取schema定义的字段
+        schema_fields = kb_schema.get("fields", []) if kb_schema else []
+        
+        # 找出稠密向量和稀疏向量的字段名
+        dense_field_name = "dense"
+        sparse_field_name = "sparse_vector"
+        for field in schema_fields:
+            if field.get("type") == "dense_vector":
+                dense_field_name = field.get("name", "dense")
+            elif field.get("type") == "sparse_vector":
+                sparse_field_name = field.get("name", "sparse_vector")
+        
+        logger.info(f"Hybrid index write: dense_field={dense_field_name}, sparse_field={sparse_field_name}")
+        
+        # 准备数据
+        metadatas = []
+        ids = []
+        vectors = []
+        
+        # 验证数量一致性
+        num_chunks = len(request.chunks)
+        if request.dense_vectors and len(request.dense_vectors) != num_chunks:
+            raise HTTPException(
+                status_code=400,
+                detail=f"chunks数量({num_chunks})与dense_vectors数量({len(request.dense_vectors)})不匹配"
+            )
+        if request.sparse_vectors and len(request.sparse_vectors) != num_chunks:
+            raise HTTPException(
+                status_code=400,
+                detail=f"chunks数量({num_chunks})与sparse_vectors数量({len(request.sparse_vectors)})不匹配"
+            )
+        
+        # 遍历chunks，组装向量和元数据
+        for i, chunk in enumerate(request.chunks):
+            # 构建metadata
+            metadata: Dict[str, Any] = {"kb_id": request.kb_id}
+            
+            # 根据schema定义添加字段
+            for field in schema_fields:
+                field_name = field["name"]
+                if request.fields and field_name not in request.fields:
+                    continue
+                if field.get("type") in ["dense_vector", "sparse_vector"]:
+                    continue
+                
+                if field_name in chunk:
+                    metadata[field_name] = chunk[field_name]
+                else:
+                    # 设置默认值
+                    field_type = field.get("type", "text")
+                    if field_type == "text":
+                        metadata[field_name] = ""
+                    elif field_type == "integer":
+                        metadata[field_name] = 0
+                    elif field_type == "float":
+                        metadata[field_name] = 0.0
+                    elif field_type == "boolean":
+                        metadata[field_name] = False
+                    elif field_type == "keyword":
+                        metadata[field_name] = ""
+                    else:
+                        metadata[field_name] = ""
+            
+            # 添加默认字段
+            if "chunk_id" not in metadata:
+                metadata["chunk_id"] = chunk.get("id", f"chunk_{i}")
+            if "content" not in metadata:
+                metadata["content"] = chunk.get("content", "")
+            if "char_count" not in metadata:
+                metadata["char_count"] = chunk.get("char_count", 0)
+            if "token_count" not in metadata:
+                metadata["token_count"] = chunk.get("token_count", 0)
+            if "source" not in metadata:
+                metadata["source"] = chunk.get("source", "")
+            if "created_at" not in metadata:
+                metadata["created_at"] = chunk.get("created_at", "")
+            
+            metadatas.append(metadata)
+            
+            # 处理ID
+            chunk_id = chunk.get("id", f"chunk_{i}")
+            try:
+                int_id = int(chunk_id)
+                if int_id >= 0:
+                    ids.append(int_id)
+                else:
+                    ids.append(chunk_id)
+            except ValueError:
+                ids.append(chunk_id)
+            
+            # 组装向量 - 这是关键：把稠密和稀疏向量组合到一个字典中
+            vector_data: Dict[str, Any] = {}
+            
+            # 添加稠密向量
+            if request.dense_vectors:
+                vector_data[dense_field_name] = request.dense_vectors[i]
+            else:
+                # 如果没有提供稠密向量，使用零向量
+                vector_data[dense_field_name] = [0.0] * vector_dimension
+            
+            # 添加稀疏向量
+            if request.sparse_vectors:
+                sparse_vector = request.sparse_vectors[i]
+                # 处理不同的稀疏向量格式
+                # 优先检查外层的 qdrant_format（最常见的格式）
+                if "qdrant_format" in sparse_vector:
+                    vector_data[sparse_field_name] = sparse_vector["qdrant_format"]
+                    if i == 0:
+                        logger.info(f"Sparse vector format 1: qdrant_format with {len(sparse_vector['qdrant_format'].get('indices', []))} indices")
+                # 检查外层的 indices/values
+                elif "indices" in sparse_vector and "values" in sparse_vector:
+                    vector_data[sparse_field_name] = {
+                        "indices": sparse_vector["indices"],
+                        "values": sparse_vector["values"]
+                    }
+                    if i == 0:
+                        logger.info(f"Sparse vector format 2: indices/values with {len(sparse_vector['indices'])} indices")
+                # 检查嵌套的 sparse_vector 字段
+                elif "sparse_vector" in sparse_vector:
+                    sparse_data = sparse_vector["sparse_vector"]
+                    if "qdrant_format" in sparse_data:
+                        vector_data[sparse_field_name] = sparse_data["qdrant_format"]
+                        if i == 0:  # 只打印第一个
+                            logger.info(f"Sparse vector format 3: sparse_vector.qdrant_format with {len(sparse_data['qdrant_format'].get('indices', []))} indices")
+                    elif "indices" in sparse_data and "values" in sparse_data:
+                        vector_data[sparse_field_name] = {
+                            "indices": sparse_data["indices"],
+                            "values": sparse_data["values"]
+                        }
+                        if i == 0:
+                            logger.info(f"Sparse vector format 4: sparse_vector.indices/values with {len(sparse_data['indices'])} indices")
+                
+                # 调试：打印第一个向量的完整数据
+                if i == 0:
+                    logger.info(f"First vector_data keys: {list(vector_data.keys())}")
+                    if sparse_field_name in vector_data:
+                        logger.info(f"Sparse vector has {len(vector_data[sparse_field_name].get('indices', []))} indices")
+            
+            vectors.append(vector_data)
+        
+        # 一次性插入所有向量（每个point同时包含稠密和稀疏向量）
+        await vector_db_service.insert_vectors(
+            collection_name=request.kb_id,
+            vectors=vectors,
+            metadatas=metadatas,
+            ids=ids
+        )
+        
+        return JSONResponse(
+            content=success_response(
+                data={
+                    "kb_id": request.kb_id,
+                    "written_count": len(vectors),
+                    "has_dense": request.dense_vectors is not None and len(request.dense_vectors) > 0,
+                    "has_sparse": request.sparse_vectors is not None and len(request.sparse_vectors) > 0,
+                    "status": "success"
+                },
+                message=f"成功写入 {len(vectors)} 个混合向量到 {kb.vector_db_type}"
+            )
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"混合索引写入失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"写入失败: {str(e)}")
 
 
@@ -779,8 +1067,8 @@ async def write_keyword_index(request: WriteKeywordIndexRequest):
                 if request.fields and field_name not in request.fields:
                     continue
                     
-                # 如果字段是关键词索引字段或稀疏向量索引字段，跳过（这些单独处理）
-                if field.get("isKeywordIndex") or field.get("isSparseVectorIndex"):
+                # 如果字段是向量字段，跳过（这些单独处理）
+                if field.get("type") in ["dense_vector", "sparse_vector", "keyword"]:
                     continue
                     
                 # 从chunk中获取字段值，如果不存在则使用默认值
@@ -791,12 +1079,12 @@ async def write_keyword_index(request: WriteKeywordIndexRequest):
                     field_type = field.get("type", "text")
                     if field_type == "text":
                         metadata[field_name] = ""
-                    elif field_type == "number":
+                    elif field_type == "integer":
                         metadata[field_name] = 0
+                    elif field_type == "float":
+                        metadata[field_name] = 0.0
                     elif field_type == "boolean":
                         metadata[field_name] = False
-                    elif field_type == "array":
-                        metadata[field_name] = []
                     elif field_type == "keyword":
                         metadata[field_name] = ""
                     else:
@@ -1228,21 +1516,30 @@ async def delete_debug_result(result_type: str, result_id: str):
 @router.post("/sparse-vector/generate", summary="生成稀疏向量")
 async def generate_sparse_vector(request: SparseVectorRequest):
     """
-    生成稀疏向量
+    生成稀疏向量（调试模式，不强依赖知识库）
     
     Returns:
         稀疏向量和Qdrant格式
     """
     try:
-        # 创建检索服务
-        retrieval_service = RetrievalService()
-        
-        # 生成稀疏向量
-        sparse_vector = await retrieval_service.generate_sparse_vector(
-            kb_id=request.kb_id,
-            text=request.text,
-            method=request.method
-        )
+        # 如果kb_id是temp_kb或为空，则使用独立的稀疏向量服务（不依赖知识库）
+        if request.kb_id == "temp_kb" or not request.kb_id:
+            # 直接使用稀疏向量服务，不依赖知识库
+            from app.services.sparse_vector_service import SparseVectorServiceFactory
+            
+            # 创建稀疏向量服务
+            sparse_service = SparseVectorServiceFactory.create(request.method)
+            
+            # 生成稀疏向量
+            sparse_vector = sparse_service.generate_sparse_vector(request.text)
+        else:
+            # 使用知识库相关的稀疏向量生成（会使用知识库的文档统计信息）
+            retrieval_service = RetrievalService()
+            sparse_vector = await retrieval_service.generate_sparse_vector(
+                kb_id=request.kb_id,
+                text=request.text,
+                method=request.method
+            )
         
         # 转换为Qdrant格式
         indices, values = convert_sparse_vector_to_qdrant_format(sparse_vector)

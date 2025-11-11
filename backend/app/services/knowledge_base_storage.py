@@ -104,7 +104,20 @@ class KnowledgeBaseStorageService:
         if schema_fields is None:
             schema_fields = [
                 {"name": "content", "type": "text", "isIndexed": True, "isVectorIndex": False},
-                {"name": "embedding", "type": "array", "isIndexed": True, "isVectorIndex": True},
+                {
+                    "name": "embedding", 
+                    "type": "dense_vector", 
+                    "isIndexed": True, 
+                    "isVectorIndex": True,
+                    "dimension": 1024,
+                    "distance": "Cosine",
+                    "hnsw": {
+                        "m": 16,
+                        "ef_construct": 100,
+                        "full_scan_threshold": 10000,
+                        "on_disk": False
+                    }
+                },
                 {"name": "sparse_vector", "type": "sparse_vector", "isIndexed": True, "isSparseVectorIndex": True}
             ]
         
@@ -306,7 +319,7 @@ class KnowledgeBaseStorageService:
         
         return config.get("data", {}).get("schema")
     
-    async def update_schema(self, kb_id: str, schema_fields: List[Dict[str, Any]], vector_db_type: Optional[str] = None) -> bool:
+    async def update_schema(self, kb_id: str, schema_fields: List[Dict[str, Any]], vector_db_type: Optional[str] = None, vector_db_config: Optional[Dict[str, Any]] = None) -> bool:
         """更新知识库的 schema 配置"""
         config = self._load_kb_config(kb_id)
         if not config:
@@ -315,6 +328,10 @@ class KnowledgeBaseStorageService:
         kb_data = config.get("data", {})
         if vector_db_type:
             kb_data["vector_db_type"] = vector_db_type
+        
+        # 更新向量数据库配置
+        if vector_db_config is not None:
+            kb_data["vector_db_config"] = vector_db_config
         
         kb_data["schema"] = {
             "vector_db_type": vector_db_type or kb_data.get("vector_db_type"),

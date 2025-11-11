@@ -24,8 +24,32 @@ import { knowledgeBaseAPI, type KnowledgeBase } from "@/lib/api"
 import { showToast } from "@/lib/toast"
 import { saveResultToStorage, loadResultFromStorage, listResultsByType, type SavedResult } from "@/lib/storage"
 
-// Schema字段类型
-type FieldType = "text" | "array" | "number" | "boolean" | "keyword" | "sparse_vector"
+// Schema字段类型 - 对应Qdrant的Payload类型和向量类型
+type FieldType = 
+  | "text"           // 文本字段（Qdrant Payload）
+  | "keyword"        // 关键词字段（Qdrant Payload）
+  | "integer"        // 整数字段（Qdrant Payload）
+  | "float"          // 浮点数字段（Qdrant Payload）
+  | "boolean"        // 布尔字段（Qdrant Payload）
+  | "dense_vector"   // 稠密向量（Qdrant Named Vector）
+  | "sparse_vector"  // 稀疏向量（Qdrant Sparse Vector）
+
+// Qdrant距离度量类型
+type DistanceMetric = "Cosine" | "Euclid" | "Dot" | "Manhattan"
+
+// HNSW索引配置
+interface HNSWConfig {
+  m?: number // 连接数，默认16
+  ef_construct?: number // 构建时的搜索宽度，默认100
+  full_scan_threshold?: number // 全扫描阈值，默认10000
+  on_disk?: boolean // 是否使用磁盘索引
+}
+
+// 向量量化配置
+interface QuantizationConfig {
+  type?: "scalar" | "product" | "binary" // 量化类型
+  always_ram?: boolean // 是否始终保持在内存中
+}
 
 interface SchemaField {
   name: string
@@ -38,6 +62,11 @@ interface SchemaField {
   description?: string // 字段描述
   // 添加稀疏向量特定属性
   sparseMethod?: "bm25" | "tf-idf" | "splade" // 稀疏向量生成方法
+  // Qdrant向量配置
+  distance?: DistanceMetric // 距离度量类型
+  hnsw?: HNSWConfig // HNSW索引配置
+  quantization?: QuantizationConfig // 量化配置
+  on_disk?: boolean // 是否使用磁盘存储（向量数据）
 }
 
 export default function KnowledgeBaseConfig() {
@@ -57,6 +86,9 @@ export default function KnowledgeBaseConfig() {
   const [activeConfigTab, setActiveConfigTab] = useState<string>("schema")
   const [schemaFields, setSchemaFields] = useState<SchemaField[]>([])
   const [vectorDbType, setVectorDbType] = useState<string>("")
+  const [vectorDbConfig, setVectorDbConfig] = useState<Record<string, any>>({})
+  const [vectorDbConfigModified, setVectorDbConfigModified] = useState<Record<string, boolean>>({}) // 标记哪些字段被修改过
+  const [vectorDbConfigExists, setVectorDbConfigExists] = useState<Record<string, boolean>>({}) // 标记哪些敏感字段已存在（但不存储值）
   const [isDataWritten, setIsDataWritten] = useState(false)
   const [editingField, setEditingField] = useState<SchemaField | null>(null)
   
@@ -145,32 +177,125 @@ export default function KnowledgeBaseConfig() {
       setIsDataWritten(kb.document_count > 0 || kb.chunk_count > 0)
       setVectorDbType(kb.vector_db_type)
       
+      // 加载配置，但不加载敏感字段（密码、API密钥）
+      const config = kb.vector_db_config || {}
+      const safeConfig: Record<string, any> = {}
+      const existsFlags: Record<string, boolean> = {}
+      
+      // 只加载非敏感字段（明确检查，避免undefined）
+      if (config.host && config.host.trim()) safeConfig.host = config.host
+      if (config.port !== undefined && config.port !== null) safeConfig.port = config.port
+      if (config.url && config.url.trim()) safeConfig.url = config.url
+      if (config.user && config.user.trim()) safeConfig.user = config.user
+      
+      // 标记敏感字段是否存在（但不存储实际值）
+      if (config.api_key && config.api_key.trim()) existsFlags.api_key = true
+      if (config.password && config.password.trim()) existsFlags.password = true
+      
+      // 确保新建知识库时所有字段都是空的
+      setVectorDbConfig(safeConfig)
+      setVectorDbConfigExists(existsFlags)
+      setVectorDbConfigModified({}) // 重置修改标记
+      
       // 尝试加载已保存的schema配置
       try {
         const schemaResponse = await knowledgeBaseAPI.getSchema(kb.id)
         if (schemaResponse.data) {
           const schema = schemaResponse.data
           if (schema.fields && Array.isArray(schema.fields)) {
-            setSchemaFields(schema.fields)
+            // 转换旧格式到新格式（一次性迁移）
+            const migratedFields = schema.fields.map((field: any) => {
+              // array + isVectorIndex → dense_vector
+              if (field.type === "array" && field.isVectorIndex) {
+                return { 
+                  ...field, 
+                  type: "dense_vector",
+                  dimension: field.dimension || 1024,
+                  distance: field.distance || "Cosine",
+                  hnsw: field.hnsw || {
+                    m: 16,
+                    ef_construct: 100,
+                    full_scan_threshold: 10000,
+                    on_disk: false
+                  }
+                }
+              }
+              // number → integer
+              if (field.type === "number") {
+                return { ...field, type: "integer" }
+              }
+              return field
+            })
+            setSchemaFields(migratedFields)
           }
           if (schema.vector_db_type) {
             setVectorDbType(schema.vector_db_type)
           }
         } else {
-          // 如果没有schema，使用默认值（包含稀疏向量字段）
+          // 如果没有schema，使用默认值（包含稀疏向量字段和Qdrant配置）
           const defaultFields: SchemaField[] = [
-            { name: "content", type: "text", isIndexed: true, isVectorIndex: false },
-            { name: "embedding", type: "array", isIndexed: true, isVectorIndex: true, dimension: 1024 },
-            { name: "sparse_vector", type: "sparse_vector", isIndexed: true, isSparseVectorIndex: true, sparseMethod: "bm25" }
+            { 
+              name: "content", 
+              type: "text", 
+              isIndexed: true, 
+              isVectorIndex: false 
+            },
+            { 
+              name: "embedding", 
+              type: "dense_vector", 
+              isIndexed: true, 
+              isVectorIndex: true, 
+              dimension: 1024,
+              distance: "Cosine",
+              on_disk: false,
+              hnsw: {
+                m: 16,
+                ef_construct: 100,
+                full_scan_threshold: 10000,
+                on_disk: false
+              }
+            },
+            { 
+              name: "sparse_vector", 
+              type: "sparse_vector", 
+              isIndexed: true, 
+              isSparseVectorIndex: true, 
+              sparseMethod: "bm25" 
+            }
           ]
           setSchemaFields(defaultFields)
         }
       } catch (schemaErr: any) {
-        // 如果获取schema失败，使用默认值（包含稀疏向量字段）
+        // 如果获取schema失败，使用默认值（包含稀疏向量字段和Qdrant配置）
         const defaultFields: SchemaField[] = [
-          { name: "content", type: "text", isIndexed: true, isVectorIndex: false },
-          { name: "embedding", type: "array", isIndexed: true, isVectorIndex: true, dimension: 1024 },
-          { name: "sparse_vector", type: "sparse_vector", isIndexed: true, isSparseVectorIndex: true, sparseMethod: "bm25" }
+          { 
+            name: "content", 
+            type: "text", 
+            isIndexed: true, 
+            isVectorIndex: false 
+          },
+          { 
+            name: "embedding", 
+            type: "dense_vector", 
+            isIndexed: true, 
+            isVectorIndex: true, 
+            dimension: 1024,
+            distance: "Cosine",
+            on_disk: false,
+            hnsw: {
+              m: 16,
+              ef_construct: 100,
+              full_scan_threshold: 10000,
+              on_disk: false
+            }
+          },
+          { 
+            name: "sparse_vector", 
+            type: "sparse_vector", 
+            isIndexed: true, 
+            isSparseVectorIndex: true, 
+            sparseMethod: "bm25" 
+          }
         ]
         setSchemaFields(defaultFields)
       }
@@ -191,6 +316,54 @@ export default function KnowledgeBaseConfig() {
       isVectorIndex: false,
     }
     setEditingField(newField)
+  }
+
+  // 处理字段类型切换，初始化默认配置
+  const handleFieldTypeChange = (newType: FieldType) => {
+    if (!editingField) return
+    
+    const baseField = { ...editingField, type: newType }
+    
+    // 如果切换到稠密向量类型，初始化默认配置
+    if (newType === "dense_vector") {
+      setEditingField({
+        ...baseField,
+        isVectorIndex: true,
+        dimension: editingField.dimension || 1024,
+        distance: editingField.distance || "Cosine",
+        on_disk: editingField.on_disk ?? false,
+        hnsw: editingField.hnsw || {
+          m: 16,
+          ef_construct: 100,
+          full_scan_threshold: 10000,
+          on_disk: false
+        },
+        quantization: editingField.quantization || undefined
+      })
+    }
+    // 如果切换到稀疏向量类型，初始化默认配置
+    else if (newType === "sparse_vector") {
+      setEditingField({
+        ...baseField,
+        isSparseVectorIndex: true,
+        sparseMethod: editingField.sparseMethod || "bm25"
+      })
+    }
+    // 其他类型，清除向量相关配置
+    else {
+      setEditingField({
+        ...baseField,
+        isVectorIndex: false,
+        isSparseVectorIndex: false,
+        isKeywordIndex: newType === "keyword" ? false : undefined,
+        dimension: undefined,
+        distance: undefined,
+        hnsw: undefined,
+        quantization: undefined,
+        on_disk: undefined,
+        sparseMethod: undefined
+      })
+    }
   }
 
   // 保存字段编辑
@@ -240,14 +413,51 @@ export default function KnowledgeBaseConfig() {
     try {
       setSavingSchema(true)
       
+      // 构建安全的配置对象：只包含非敏感字段或用户修改过的字段
+      const safeConfig: Record<string, any> = {}
+      
+      // 添加非敏感字段
+      if (vectorDbConfig.host) safeConfig.host = vectorDbConfig.host
+      if (vectorDbConfig.port) safeConfig.port = vectorDbConfig.port
+      if (vectorDbConfig.url) safeConfig.url = vectorDbConfig.url
+      if (vectorDbConfig.user) safeConfig.user = vectorDbConfig.user
+      
+      // 只有用户修改过的敏感字段才包含
+      if (vectorDbConfigModified.api_key) {
+        if (vectorDbConfig.api_key) {
+          safeConfig.api_key = vectorDbConfig.api_key
+        }
+        // 如果用户清空了字段，不发送该字段（保持原值）
+      } else if (vectorDbConfigExists.api_key) {
+        // 用户没有修改，保持原值，不发送该字段
+      }
+      
+      if (vectorDbConfigModified.password) {
+        if (vectorDbConfig.password) {
+          safeConfig.password = vectorDbConfig.password
+        }
+        // 如果用户清空了字段，不发送该字段（保持原值）
+      } else if (vectorDbConfigExists.password) {
+        // 用户没有修改，保持原值，不发送该字段
+      }
+      
       // 直接更新知识库的schema配置
       await knowledgeBaseAPI.updateSchema(
         selectedKb.id,
         schemaFields,
-        vectorDbType
+        vectorDbType,
+        safeConfig
       )
       
       showToast("Schema保存成功", "success")
+      // 保存后更新存在标记并清除修改标记
+      if (vectorDbConfigModified.api_key && vectorDbConfig.api_key) {
+        setVectorDbConfigExists({ ...vectorDbConfigExists, api_key: true })
+      }
+      if (vectorDbConfigModified.password && vectorDbConfig.password) {
+        setVectorDbConfigExists({ ...vectorDbConfigExists, password: true })
+      }
+      setVectorDbConfigModified({})
     } catch (err: any) {
       showToast(`保存失败: ${err.message}`, "error")
     } finally {
@@ -275,17 +485,42 @@ export default function KnowledgeBaseConfig() {
       }
 
       const schemaData = result.data
+      
+      // 转换旧格式到新格式（一次性迁移）
+      let migratedFields: any[] = []
       if (schemaData.fields && Array.isArray(schemaData.fields)) {
-        setSchemaFields(schemaData.fields)
+        migratedFields = schemaData.fields.map((field: any) => {
+          // array + isVectorIndex → dense_vector
+          if (field.type === "array" && field.isVectorIndex) {
+            return { 
+              ...field, 
+              type: "dense_vector",
+              dimension: field.dimension || 1024,
+              distance: field.distance || "Cosine",
+              hnsw: field.hnsw || {
+                m: 16,
+                ef_construct: 100,
+                full_scan_threshold: 10000,
+                on_disk: false
+              }
+            }
+          }
+          // number → integer
+          if (field.type === "number") {
+            return { ...field, type: "integer" }
+          }
+          return field
+        })
+        setSchemaFields(migratedFields)
       }
       if (schemaData.vector_db_type) {
         setVectorDbType(schemaData.vector_db_type)
       }
       
-      // 直接保存到当前知识库
+      // 直接保存到当前知识库（使用转换后的字段）
       await knowledgeBaseAPI.updateSchema(
         selectedKb.id,
-        schemaData.fields || [],
+        migratedFields,
         schemaData.vector_db_type
       )
       
@@ -366,6 +601,50 @@ export default function KnowledgeBaseConfig() {
             {/* Schema管理 - 去掉Card包装 */}
             {activeConfigTab === "schema" && (
               <div className="space-y-6">
+                {/* Qdrant配置摘要卡片 */}
+                {vectorDbType === "qdrant" && schemaFields.length > 0 && (
+                  <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
+                    <CardHeader>
+                      <CardTitle className="text-sm font-medium text-blue-900 flex items-center gap-2">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Qdrant向量配置摘要
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+                        {schemaFields.filter(f => f.type === "dense_vector").map(field => (
+                          <div key={field.name} className="bg-white p-3 rounded border border-blue-100">
+                            <div className="font-medium text-gray-900 mb-2">🔷 {field.name}</div>
+                            <div className="space-y-1 text-xs text-gray-600">
+                              <div>• 维度: {field.dimension || "未设置"}</div>
+                              <div>• 距离: {field.distance || "Cosine"}</div>
+                              <div>• HNSW-m: {field.hnsw?.m || 16}</div>
+                              <div>• HNSW-ef: {field.hnsw?.ef_construct || 100}</div>
+                              <div>• 量化: {field.quantization?.type ? field.quantization.type.toUpperCase() : "无"}</div>
+                              <div>• 磁盘: {field.on_disk ? "是" : "否"}</div>
+                            </div>
+                          </div>
+                        ))}
+                        {schemaFields.filter(f => f.type === "sparse_vector").map(field => (
+                          <div key={field.name} className="bg-white p-3 rounded border border-purple-100">
+                            <div className="font-medium text-gray-900 mb-2">⚡ {field.name}</div>
+                            <div className="space-y-1 text-xs text-gray-600">
+                              <div>• 类型: 稀疏向量</div>
+                              <div>• 方法: {field.sparseMethod?.toUpperCase() || "BM25"}</div>
+                              <div>• 用途: 混合检索</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-3 text-xs text-blue-700">
+                        💡 提示: 点击"编辑"按钮可调整HNSW、量化、距离度量等高级配置
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-semibold text-gray-900">Schema定义</h3>
                   <div className="flex items-center gap-2">
@@ -421,6 +700,178 @@ export default function KnowledgeBaseConfig() {
                   )}
                 </div>
 
+                {/* 向量数据库服务地址配置 */}
+                <div className="border rounded-lg p-4 bg-gray-50">
+                  <h4 className="text-sm font-medium text-gray-700 mb-3">向量数据库服务地址配置</h4>
+                  <form autoComplete="off" onSubmit={(e) => e.preventDefault()}>
+                  {vectorDbType === "qdrant" && (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">服务地址（可选，留空使用默认配置）</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input
+                            autoComplete="off"
+                            name={`${vectorDbType}-host-${selectedKb?.id || 'new'}`}
+                            id={`${vectorDbType}-host-${selectedKb?.id || 'new'}`}
+                            placeholder="主机地址（如：localhost）"
+                            value={vectorDbConfig.host || ""}
+                            onChange={(e) => setVectorDbConfig({ ...vectorDbConfig, host: e.target.value })}
+                            disabled={isDataWritten}
+                          />
+                          <Input
+                            type="number"
+                            autoComplete="off"
+                            name={`${vectorDbType}-port-${selectedKb?.id || 'new'}`}
+                            id={`${vectorDbType}-port-${selectedKb?.id || 'new'}`}
+                            placeholder="端口（如：6333）"
+                            value={vectorDbConfig.port || ""}
+                            onChange={(e) => setVectorDbConfig({ ...vectorDbConfig, port: e.target.value ? parseInt(e.target.value) : undefined })}
+                            disabled={isDataWritten}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">或使用完整URL</label>
+                        <Input
+                          autoComplete="url"
+                          name={`qdrant-url-${selectedKb?.id || 'new'}`}
+                          id={`qdrant-url-${selectedKb?.id || 'new'}`}
+                          placeholder="http://localhost:6333 或 localhost:6333"
+                          value={vectorDbConfig.url || ""}
+                          onChange={(e) => setVectorDbConfig({ ...vectorDbConfig, url: e.target.value })}
+                          disabled={isDataWritten}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">API密钥（可选）</label>
+                        <Input
+                          type="password"
+                          autoComplete="new-password"
+                          name="qdrant-api-key"
+                          id={`qdrant-api-key-${selectedKb?.id || 'new'}`}
+                          placeholder={vectorDbConfigModified.api_key ? "" : (vectorDbConfigExists.api_key ? "已配置（留空不修改，输入新值覆盖）" : "API密钥（可选）")}
+                          value={vectorDbConfigModified.api_key ? (vectorDbConfig.api_key || "") : ""}
+                          onChange={(e) => {
+                            setVectorDbConfig({ ...vectorDbConfig, api_key: e.target.value })
+                            setVectorDbConfigModified({ ...vectorDbConfigModified, api_key: true })
+                          }}
+                          disabled={isDataWritten}
+                        />
+                        {!vectorDbConfigModified.api_key && vectorDbConfigExists.api_key && (
+                          <p className="text-xs text-gray-400 mt-1">当前已配置，输入新值可覆盖</p>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        💡 提示：如果留空，将使用系统默认配置（从环境变量读取）
+                      </p>
+                    </div>
+                  )}
+                  {vectorDbType === "elasticsearch" && (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">服务地址（可选）</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input
+                            autoComplete="off"
+                            placeholder="主机地址"
+                            value={vectorDbConfig.host || ""}
+                            onChange={(e) => setVectorDbConfig({ ...vectorDbConfig, host: e.target.value })}
+                            disabled={isDataWritten}
+                          />
+                          <Input
+                            type="number"
+                            autoComplete="off"
+                            placeholder="端口（如：9200）"
+                            value={vectorDbConfig.port || ""}
+                            onChange={(e) => setVectorDbConfig({ ...vectorDbConfig, port: e.target.value ? parseInt(e.target.value) : undefined })}
+                            disabled={isDataWritten}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input
+                          autoComplete="off"
+                          name={`${vectorDbType}-user-${selectedKb?.id || 'new'}`}
+                          id={`${vectorDbType}-user-${selectedKb?.id || 'new'}`}
+                          placeholder="用户名（可选）"
+                          value={vectorDbConfig.user || ""}
+                          onChange={(e) => setVectorDbConfig({ ...vectorDbConfig, user: e.target.value })}
+                          disabled={isDataWritten}
+                        />
+                        <Input
+                          type="password"
+                          autoComplete="new-password"
+                          name={`${vectorDbType}-password-${selectedKb?.id || 'new'}`}
+                          id={`${vectorDbType}-password-${selectedKb?.id || 'new'}`}
+                          placeholder={vectorDbConfigModified.password ? "密码（可选）" : (vectorDbConfigExists.password ? "已配置（留空不修改，输入新值覆盖）" : "密码（可选）")}
+                          value={vectorDbConfigModified.password ? (vectorDbConfig.password || "") : ""}
+                          onChange={(e) => {
+                            setVectorDbConfig({ ...vectorDbConfig, password: e.target.value })
+                            setVectorDbConfigModified({ ...vectorDbConfigModified, password: true })
+                          }}
+                          disabled={isDataWritten}
+                        />
+                        {!vectorDbConfigModified.password && vectorDbConfigExists.password && (
+                          <p className="text-xs text-gray-400 mt-1">当前已配置，输入新值可覆盖</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {vectorDbType === "milvus" && (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">服务地址（可选）</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input
+                            placeholder="主机地址"
+                            value={vectorDbConfig.host || ""}
+                            onChange={(e) => setVectorDbConfig({ ...vectorDbConfig, host: e.target.value })}
+                            disabled={isDataWritten}
+                          />
+                          <Input
+                            type="number"
+                            placeholder="端口（如：19530）"
+                            value={vectorDbConfig.port || ""}
+                            onChange={(e) => setVectorDbConfig({ ...vectorDbConfig, port: e.target.value ? parseInt(e.target.value) : undefined })}
+                            disabled={isDataWritten}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input
+                          autoComplete="off"
+                          name={`${vectorDbType}-user-${selectedKb?.id || 'new'}`}
+                          id={`${vectorDbType}-user-${selectedKb?.id || 'new'}`}
+                          placeholder="用户名（可选）"
+                          value={vectorDbConfig.user || ""}
+                          onChange={(e) => setVectorDbConfig({ ...vectorDbConfig, user: e.target.value })}
+                          disabled={isDataWritten}
+                        />
+                        <Input
+                          type="password"
+                          autoComplete="new-password"
+                          name={`${vectorDbType}-password-${selectedKb?.id || 'new'}`}
+                          id={`${vectorDbType}-password-${selectedKb?.id || 'new'}`}
+                          placeholder={vectorDbConfigModified.password ? "密码（可选）" : (vectorDbConfigExists.password ? "已配置（留空不修改，输入新值覆盖）" : "密码（可选）")}
+                          value={vectorDbConfigModified.password ? (vectorDbConfig.password || "") : ""}
+                          onChange={(e) => {
+                            setVectorDbConfig({ ...vectorDbConfig, password: e.target.value })
+                            setVectorDbConfigModified({ ...vectorDbConfigModified, password: true })
+                          }}
+                          disabled={isDataWritten}
+                        />
+                        {!vectorDbConfigModified.password && vectorDbConfigExists.password && (
+                          <p className="text-xs text-gray-400 mt-1">当前已配置，输入新值可覆盖</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {!vectorDbType && (
+                    <p className="text-sm text-gray-500">请先选择向量数据库类型</p>
+                  )}
+                  </form>
+                </div>
+
                 {/* Schema字段表格 */}
                 <div className="border rounded-lg overflow-hidden">
                   <table className="w-full">
@@ -449,14 +900,16 @@ export default function KnowledgeBaseConfig() {
                           <td className="px-4 py-3 text-sm text-gray-600">
                             {field.type === "text"
                               ? "文本"
-                              : field.type === "array"
-                              ? "数组"
-                              : field.type === "number"
-                              ? "数字"
-                              : field.type === "boolean"
-                              ? "布尔"
                               : field.type === "keyword"
                               ? "关键词"
+                              : field.type === "integer"
+                              ? "整数"
+                              : field.type === "float"
+                              ? "浮点数"
+                              : field.type === "boolean"
+                              ? "布尔"
+                              : field.type === "dense_vector"
+                              ? "稠密向量"
                               : "稀疏向量"}
                             {field.isVectorIndex && (
                               <span className="ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded">
@@ -522,7 +975,7 @@ export default function KnowledgeBaseConfig() {
         {/* 编辑字段对话框 */}
         {editingField && (
           <Dialog open={!!editingField} onOpenChange={() => setEditingField(null)}>
-            <DialogContent>
+            <DialogContent className="max-h-[90vh] flex flex-col max-w-2xl">
               <DialogHeader>
                 <DialogTitle>
                   {schemaFields.includes(editingField) ? "编辑字段" : "添加字段"}
@@ -531,7 +984,7 @@ export default function KnowledgeBaseConfig() {
                   配置字段的名称、类型和索引选项
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-4 py-4">
+              <div className="space-y-4 py-4 overflow-y-auto flex-1 max-h-[60vh]">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     字段名称
@@ -551,22 +1004,24 @@ export default function KnowledgeBaseConfig() {
                   </label>
                   <Select
                     value={editingField.type}
-                    onValueChange={(value: FieldType) =>
-                      setEditingField({ ...editingField, type: value })
-                    }
+                    onValueChange={(value: FieldType) => handleFieldTypeChange(value)}
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="text">文本</SelectItem>
-                      <SelectItem value="array">数组</SelectItem>
-                      <SelectItem value="number">数字</SelectItem>
-                      <SelectItem value="boolean">布尔</SelectItem>
-                      <SelectItem value="keyword">关键词</SelectItem>
-                      <SelectItem value="sparse_vector">稀疏向量</SelectItem>
+                      <SelectItem value="text">文本 (Payload)</SelectItem>
+                      <SelectItem value="keyword">关键词 (Payload)</SelectItem>
+                      <SelectItem value="integer">整数 (Payload)</SelectItem>
+                      <SelectItem value="float">浮点数 (Payload)</SelectItem>
+                      <SelectItem value="boolean">布尔 (Payload)</SelectItem>
+                      <SelectItem value="dense_vector">稠密向量 (Named Vector)</SelectItem>
+                      <SelectItem value="sparse_vector">稀疏向量 (Sparse Vector)</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Payload字段存储元数据，向量字段用于相似度搜索
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -595,25 +1050,20 @@ export default function KnowledgeBaseConfig() {
                     />
                     <span className="text-sm text-gray-700">创建索引</span>
                   </label>
-                  {editingField.type === "array" && (
+                  {editingField.type === "dense_vector" && (
                     <label className="flex items-center space-x-2">
                       <input
                         type="checkbox"
-                        checked={editingField.isVectorIndex}
+                        checked={editingField.isVectorIndex ?? true}
                         onChange={(e) => {
-                          const newEditingField = {
+                          setEditingField({
                             ...editingField,
                             isVectorIndex: e.target.checked,
-                          };
-                          // 如果选中向量索引，确保类型为array
-                          if (e.target.checked) {
-                            newEditingField.type = "array";
-                          }
-                          setEditingField(newEditingField);
+                          });
                         }}
                         className="rounded border-gray-300"
                       />
-                      <span className="text-sm text-gray-700">向量索引</span>
+                      <span className="text-sm text-gray-700">向量索引（推荐）</span>
                     </label>
                   )}
                   {editingField.type === "keyword" && (
@@ -648,25 +1098,214 @@ export default function KnowledgeBaseConfig() {
                       <span className="text-sm text-gray-700">稀疏向量索引</span>
                     </label>
                   )}
-                  {(editingField.type === "array" && editingField.isVectorIndex) && (
-                    <div className="mt-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        向量维度
-                      </label>
-                      <Input
-                        type="number"
-                        value={editingField.dimension || ""}
-                        onChange={(e) =>
-                          setEditingField({ 
-                            ...editingField, 
-                            dimension: parseInt(e.target.value) || undefined 
-                          })
-                        }
-                        placeholder="输入向量维度"
-                      />
-                    </div>
+                  {editingField.type === "dense_vector" && (
+                    <>
+                      <div className="mt-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          向量维度
+                        </label>
+                        <Input
+                          type="number"
+                          value={editingField.dimension || ""}
+                          onChange={(e) =>
+                            setEditingField({ 
+                              ...editingField, 
+                              dimension: parseInt(e.target.value) || undefined 
+                            })
+                          }
+                          placeholder="输入向量维度"
+                        />
+                      </div>
+
+                      <div className="mt-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          距离度量
+                        </label>
+                        <Select
+                          value={editingField.distance || "Cosine"}
+                          onValueChange={(value: any) =>
+                            setEditingField({ 
+                              ...editingField, 
+                              distance: value
+                            })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Cosine">余弦距离 (Cosine)</SelectItem>
+                            <SelectItem value="Euclid">欧几里得距离 (Euclid)</SelectItem>
+                            <SelectItem value="Dot">点积 (Dot)</SelectItem>
+                            <SelectItem value="Manhattan">曼哈顿距离 (Manhattan)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="mt-2">
+                        <label className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            checked={editingField.on_disk || false}
+                            onChange={(e) =>
+                              setEditingField({
+                                ...editingField,
+                                on_disk: e.target.checked,
+                              })
+                            }
+                            className="rounded border-gray-300"
+                          />
+                          <span className="text-sm text-gray-700">使用磁盘存储（适用于大规模向量）</span>
+                        </label>
+                      </div>
+
+                      {/* HNSW配置 */}
+                      <div className="mt-3 p-3 border rounded space-y-2">
+                        <div className="font-medium text-sm text-gray-700 mb-2">HNSW索引配置</div>
+                        
+                        <div>
+                          <label className="block text-xs text-gray-600 mb-1">
+                            连接数 (m) - 默认16，范围4-64
+                          </label>
+                          <Input
+                            type="number"
+                            value={editingField.hnsw?.m || 16}
+                            onChange={(e) =>
+                              setEditingField({ 
+                                ...editingField, 
+                                hnsw: {
+                                  ...editingField.hnsw,
+                                  m: parseInt(e.target.value) || 16
+                                }
+                              })
+                            }
+                            placeholder="16"
+                            min={4}
+                            max={64}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs text-gray-600 mb-1">
+                            构建时搜索宽度 (ef_construct) - 默认100
+                          </label>
+                          <Input
+                            type="number"
+                            value={editingField.hnsw?.ef_construct || 100}
+                            onChange={(e) =>
+                              setEditingField({ 
+                                ...editingField, 
+                                hnsw: {
+                                  ...editingField.hnsw,
+                                  ef_construct: parseInt(e.target.value) || 100
+                                }
+                              })
+                            }
+                            placeholder="100"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs text-gray-600 mb-1">
+                            全扫描阈值 (full_scan_threshold) - 默认10000
+                          </label>
+                          <Input
+                            type="number"
+                            value={editingField.hnsw?.full_scan_threshold || 10000}
+                            onChange={(e) =>
+                              setEditingField({ 
+                                ...editingField, 
+                                hnsw: {
+                                  ...editingField.hnsw,
+                                  full_scan_threshold: parseInt(e.target.value) || 10000
+                                }
+                              })
+                            }
+                            placeholder="10000"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              checked={editingField.hnsw?.on_disk || false}
+                              onChange={(e) =>
+                                setEditingField({
+                                  ...editingField,
+                                  hnsw: {
+                                    ...editingField.hnsw,
+                                    on_disk: e.target.checked,
+                                  }
+                                })
+                              }
+                              className="rounded border-gray-300"
+                            />
+                            <span className="text-xs text-gray-600">HNSW索引使用磁盘存储</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* 量化配置 */}
+                      <div className="mt-3 p-3 border rounded space-y-2">
+                        <div className="font-medium text-sm text-gray-700 mb-2">向量量化配置（可选）</div>
+                        
+                        <div>
+                          <label className="block text-xs text-gray-600 mb-1">
+                            量化类型
+                          </label>
+                          <Select
+                            value={editingField.quantization?.type || "none"}
+                            onValueChange={(value: any) =>
+                              setEditingField({ 
+                                ...editingField, 
+                                quantization: value === "none" ? undefined : {
+                                  ...editingField.quantization,
+                                  type: value
+                                }
+                              })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="选择量化类型" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">不使用量化</SelectItem>
+                              <SelectItem value="scalar">标量量化 (Scalar) - 4倍压缩</SelectItem>
+                              <SelectItem value="product">乘积量化 (Product) - 8-32倍压缩</SelectItem>
+                              <SelectItem value="binary">二值量化 (Binary) - 32倍压缩</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-gray-500 mt-1">
+                            量化可减少内存占用，但会损失一定精度
+                          </p>
+                        </div>
+
+                        {editingField.quantization?.type && (
+                          <div>
+                            <label className="flex items-center space-x-2">
+                              <input
+                                type="checkbox"
+                                checked={editingField.quantization?.always_ram || false}
+                                onChange={(e) =>
+                                  setEditingField({
+                                    ...editingField,
+                                    quantization: {
+                                      ...editingField.quantization,
+                                      always_ram: e.target.checked,
+                                    }
+                                  })
+                                }
+                                className="rounded border-gray-300"
+                              />
+                              <span className="text-xs text-gray-600">始终保持在内存中</span>
+                            </label>
+                          </div>
+                        )}
+                      </div>
+                    </>
                   )}
-                  {editingField.type === "sparse_vector" && editingField.isSparseVectorIndex && (
+                  {editingField.type === "sparse_vector" && (
                     <div className="mt-2">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         稀疏向量生成方法
@@ -693,7 +1332,7 @@ export default function KnowledgeBaseConfig() {
                   )}
                 </div>
               </div>
-              <DialogFooter>
+              <DialogFooter className="shrink-0">
                 <Button variant="outline" onClick={() => setEditingField(null)}>
                   取消
                 </Button>

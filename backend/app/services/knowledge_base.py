@@ -173,7 +173,8 @@ class KnowledgeBaseService:
         self,
         kb_id: str,
         schema_fields: List[Dict[str, Any]],
-        vector_db_type: Optional[str] = None
+        vector_db_type: Optional[str] = None,
+        vector_db_config: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
         更新知识库的 schema 配置
@@ -182,11 +183,12 @@ class KnowledgeBaseService:
             kb_id: 知识库ID
             schema_fields: Schema字段列表
             vector_db_type: 向量数据库类型（可选）
+            vector_db_config: 向量数据库配置（可选）
         
         Returns:
             是否更新成功
         """
-        return await self.storage.update_schema(kb_id, schema_fields, vector_db_type)
+        return await self.storage.update_schema(kb_id, schema_fields, vector_db_type, vector_db_config)
     
     # ========== 私有方法（待实现） ==========
     

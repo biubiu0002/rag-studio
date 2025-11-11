@@ -169,7 +169,10 @@ class RetrievalService:
         
         # 2. 创建向量数据库服务实例
         try:
-            vector_db_service = VectorDBServiceFactory.create(kb.vector_db_type)
+            vector_db_service = VectorDBServiceFactory.create(
+                kb.vector_db_type,
+                config=kb.vector_db_config if kb.vector_db_config else None
+            )
         except Exception as e:
             logger.error(f"创建向量数据库服务失败: {e}")
             return []

@@ -25,7 +25,7 @@ export default function DocumentTokenizationView() {
   const [sparseVectors, setSparseVectors] = useState<any[]>([])
   const [sparseVectorPreview, setSparseVectorPreview] = useState<any[]>([])
   const [sparseVectorConfig, setSparseVectorConfig] = useState({
-    method: "sparse"
+    method: "bm25"
   })
   const [savedSparseVectors, setSavedSparseVectors] = useState<SavedResult[]>([])
   const [selectedSparseVectorId, setSelectedSparseVectorId] = useState<string>("")
@@ -99,49 +99,88 @@ export default function DocumentTokenizationView() {
     try {
       setLoading(true)
       
-      // 生成稀疏向量
-      const sparseVectorsData: any[] = []
-      const previewData: any[] = []
+      // 并行调用API生成稀疏向量（处理所有分块）
+      const method = sparseVectorConfig.method === "bm25" ? "bm25" : 
+                     sparseVectorConfig.method === "tf" ? "tf-idf" : 
+                     "splade"
       
-      for (let i = 0; i < Math.min(chunks.length, 5); i++) { // 只预览前5个
-        const chunk = chunks[i]
-        try {
-          // 确保获取正确的文本内容
-          const textContent = typeof chunk === 'string' ? chunk : chunk.content
-          
-          const result = await debugAPI.generateSparseVector({
-            kb_id: "temp_kb", // 临时知识库ID，实际使用时需要替换
-            text: textContent,
-            method: sparseVectorConfig.method === "bm25" ? "bm25" : 
-                   sparseVectorConfig.method === "tf" ? "tf-idf" : 
-                   "simple"
-          })
-          
-          sparseVectorsData.push(result.data)
-          previewData.push({
-            index: i,
-            original: textContent,
-            sparse_vector: result.data.sparse_vector,
-            qdrant_format: result.data.qdrant_format,
-            sparsity: result.data.sparsity
-          })
-        } catch (error) {
-          // 确保获取正确的文本内容
-          const textContent = typeof chunk === 'string' ? chunk : chunk.content
-          
-          console.error(`生成第${i}个分块的稀疏向量失败:`, error)
-          previewData.push({
-            index: i,
-            original: textContent,
-            error: (error as Error).message
-          })
-        }
+      // 分批处理，避免一次发起太多请求
+      const BATCH_SIZE = 10  // 每批10个并发请求
+      const allResults: any[] = []
+      
+      for (let batchStart = 0; batchStart < chunks.length; batchStart += BATCH_SIZE) {
+        const batchEnd = Math.min(batchStart + BATCH_SIZE, chunks.length)
+        const batchChunks = chunks.slice(batchStart, batchEnd)
+        
+        console.log(`处理第 ${batchStart + 1}-${batchEnd} 个分块（共 ${chunks.length} 个）`)
+        
+        const promises = batchChunks.map(async (chunk, batchIndex) => {
+          const i = batchStart + batchIndex  // 全局索引
+          try {
+            // 确保获取正确的文本内容
+            const textContent = typeof chunk === 'string' ? chunk : chunk.content
+            
+            const result = await debugAPI.generateSparseVector({
+              kb_id: "temp_kb", // 临时知识库ID，调试模式不需要真实知识库
+              text: textContent,
+              method: method
+            })
+            
+            return {
+              success: true,
+              index: i,
+              data: result.data,
+              preview: {
+                index: i,
+                original: textContent,
+                sparse_vector: result.data.sparse_vector,
+                qdrant_format: result.data.qdrant_format,
+                sparsity: result.data.sparsity
+              }
+            }
+          } catch (error) {
+            // 确保获取正确的文本内容
+            const textContent = typeof chunk === 'string' ? chunk : chunk.content
+            
+            console.error(`生成第${i}个分块的稀疏向量失败:`, error)
+            return {
+              success: false,
+              index: i,
+              preview: {
+                index: i,
+                original: textContent,
+                error: (error as Error).message
+              }
+            }
+          }
+        })
+        
+        // 等待当前批次完成
+        const batchResults = await Promise.all(promises)
+        allResults.push(...batchResults)
+        
+        // 显示进度
+        showToast(`已处理 ${batchEnd}/${chunks.length} 个分块...`, "info")
       }
+      
+      // 分离成功和失败的结果
+      const sparseVectorsData = allResults
+        .filter(r => r.success)
+        .map(r => r.data)
+      
+      const previewData = allResults.map(r => r.preview)
       
       setSparseVectors(sparseVectorsData)
       setSparseVectorPreview(previewData)
       
-      showToast(`稀疏向量生成完成！共处理 ${chunks.length} 个分块`, "success")
+      const successCount = allResults.filter(r => r.success).length
+      const failCount = allResults.filter(r => !r.success).length
+      
+      if (failCount > 0) {
+        showToast(`稀疏向量生成完成！成功 ${successCount} 个，失败 ${failCount} 个`, "warning")
+      } else {
+        showToast(`稀疏向量生成完成！共处理 ${chunks.length} 个分块`, "success")
+      }
     } catch (error) {
       console.error("稀疏向量生成失败:", error)
       showToast("稀疏向量生成失败: " + (error as Error).message, "error")
@@ -517,6 +556,11 @@ export default function DocumentTokenizationView() {
           {/* 稀疏向量配置 */}
           <div className="border-t pt-4">
             <label className="block text-sm font-medium mb-2">稀疏向量配置</label>
+            <div className="p-3 bg-blue-50 rounded mb-3">
+              <div className="text-xs text-blue-800">
+                💡 调试模式：无需选择知识库，系统将自动使用独立的稀疏向量服务进行生成
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-2">生成方法</label>
@@ -527,12 +571,12 @@ export default function DocumentTokenizationView() {
                 >
                   <option value="bm25">BM25</option>
                   <option value="tf">TF-IDF</option>
-                  <option value="simple">Simple</option>
+                  <option value="splade">SPLADE</option>
                 </select>
                 <div className="text-xs text-gray-500 mt-1">
                   {sparseVectorConfig.method === "bm25" && "基于BM25算法的稀疏向量"}
                   {sparseVectorConfig.method === "tf" && "基于TF-IDF算法的稀疏向量"}
-                  {sparseVectorConfig.method === "simple" && "简单计数的稀疏向量"}
+                  {sparseVectorConfig.method === "splade" && "基于SPLADE模型的稀疏向量"}
                 </div>
               </div>
             </div>
@@ -548,7 +592,10 @@ export default function DocumentTokenizationView() {
         <CardContent className="space-y-4">
           <div className="p-3 bg-blue-50 rounded">
             <div className="text-sm text-blue-800">
-              待分词分块: {chunks.length} 个
+              待处理分块: {chunks.length} 个
+            </div>
+            <div className="text-xs text-blue-600 mt-1">
+              💡 将处理所有分块，分批并发（每批10个）以保证性能
             </div>
           </div>
 
@@ -564,7 +611,7 @@ export default function DocumentTokenizationView() {
               disabled={chunks.length === 0 || loading}
               variant="outline"
             >
-              {loading ? "生成中..." : "生成稀疏向量"}
+              {loading ? "生成中..." : "生成稀疏向量（全部）"}
             </Button>
           </div>
 
@@ -613,12 +660,12 @@ export default function DocumentTokenizationView() {
           {/* 稀疏向量预览 */}
           {sparseVectorPreview.length > 0 && (
             <div>
-              <div className="font-medium mb-2">稀疏向量结果预览:</div>
+              <div className="font-medium mb-2">稀疏向量结果预览（前10个）:</div>
               <div className="space-y-2 max-h-96 overflow-y-auto">
-                {sparseVectorPreview.slice(0, 5).map((item, idx) => (
+                {sparseVectorPreview.slice(0, 10).map((item, idx) => (
                   <div key={idx} className="p-3 border rounded bg-gray-50">
                     <div className="text-xs text-gray-500 mb-1">
-                      Chunk {item.index !== undefined ? item.index : idx + 1}
+                      Chunk {item.index !== undefined ? item.index + 1 : idx + 1}
                     </div>
                     {item.original && (
                       <div className="text-sm text-gray-600 mb-1">
@@ -636,7 +683,7 @@ export default function DocumentTokenizationView() {
                         </div>
                         {item.sparse_vector && (
                           <div className="text-xs text-gray-500 mt-1">
-                            稀疏向量: {JSON.stringify(Object.entries(item.sparse_vector).slice(0, 3))}...
+                            稀疏向量示例: {JSON.stringify(Object.entries(item.sparse_vector).slice(0, 3))}...
                           </div>
                         )}
                       </>
@@ -644,9 +691,9 @@ export default function DocumentTokenizationView() {
                   </div>
                 ))}
               </div>
-              {sparseVectorPreview.length > 5 && (
+              {sparseVectorPreview.length > 10 && (
                 <div className="text-sm text-gray-500 mt-2">
-                  ...还有 {sparseVectorPreview.length - 5} 个分块的稀疏向量结果
+                  ...还有 {sparseVectorPreview.length - 10} 个分块的稀疏向量结果
                 </div>
               )}
             </div>
@@ -656,6 +703,9 @@ export default function DocumentTokenizationView() {
             <div className="p-3 bg-green-50 rounded">
               <div className="text-sm text-green-800">
                 ✓ 稀疏向量生成完成！共处理 {sparseVectors.length} 个分块
+                {sparseVectors.length > 0 && sparseVectors[0] && sparseVectors[0].sparsity && (
+                  <span>，平均每块 {Math.round(sparseVectors.reduce((sum: number, v: any) => sum + (v.sparsity || 0), 0) / sparseVectors.length)} 个非零元素</span>
+                )}
               </div>
             </div>
           )}

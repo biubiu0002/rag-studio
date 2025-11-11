@@ -194,7 +194,7 @@ export const knowledgeBaseAPI = {
   /**
    * 更新知识库Schema配置
    */
-  updateSchema: async (id: string, schemaFields: any[], vectorDbType?: string) => {
+  updateSchema: async (id: string, schemaFields: any[], vectorDbType?: string, vectorDbConfig?: Record<string, any>) => {
     return request<{ success: boolean; message: string }>(
       `/knowledge-bases/${id}/schema`,
       {
@@ -202,6 +202,7 @@ export const knowledgeBaseAPI = {
         body: JSON.stringify({
           schema_fields: schemaFields,
           vector_db_type: vectorDbType,
+          vector_db_config: vectorDbConfig,
         }),
       }
     )
@@ -636,6 +637,22 @@ export const debugAPI = {
   },
 
   /**
+   * 写入混合索引（稠密向量+稀疏向量一次性写入）
+   */
+  writeHybridIndex: async (data: {
+    kb_id: string
+    chunks: any[]
+    dense_vectors?: number[][]
+    sparse_vectors?: any[]
+    fields?: string[]
+  }) => {
+    return request<{ success: boolean; data: any }>('/debug/index/hybrid/write', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  /**
    * 混合检索
    */
   hybridSearch: async (data: {
@@ -680,7 +697,7 @@ export const debugAPI = {
   generateSparseVector: async (data: {
     kb_id: string
     text: string
-    method?: "bm25" | "tf-idf" | "simple"
+    method?: "bm25" | "tf-idf" | "splade"
   }) => {
     return request<{ success: boolean; data: any }>('/debug/sparse-vector/generate', {
       method: 'POST',

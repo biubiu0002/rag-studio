@@ -110,15 +110,37 @@ class BM25SparseVectorService(BaseSparseVectorService):
         token_freq = Counter(tokens)
         doc_length = len(tokens)
         
-        # 计算BM25权重
+        # 如果没有语料库统计（调试模式），则使用简化的BM25
+        # 将当前文档作为单文档语料库
+        if self.doc_count == 0:
+            # 调试模式：使用简化计算
+            sparse_vector = {}
+            for token, freq in token_freq.items():
+                # 简化的IDF（假设单文档语料库）
+                idf = 1.0  # 默认IDF权重
+                
+                # 计算TF
+                tf = freq
+                norm_tf = (tf * (self.k1 + 1)) / (
+                    tf + self.k1 * (1 - self.b + self.b * doc_length / 1.0)
+                )
+                
+                # BM25分数
+                score = idf * norm_tf
+                if score > 0:
+                    sparse_vector[token] = score
+            return sparse_vector
+        
+        # 标准BM25计算（有语料库统计）
         sparse_vector = {}
         for token, freq in token_freq.items():
             # 计算IDF
             doc_freq = self.token_doc_freq.get(token, 0)
             if doc_freq == 0:
-                continue
-                
-            idf = math.log((self.doc_count - doc_freq + 0.5) / (doc_freq + 0.5) + 1.0)
+                # 如果token不在语料库中，使用默认IDF
+                idf = math.log(self.doc_count + 1)
+            else:
+                idf = math.log((self.doc_count - doc_freq + 0.5) / (doc_freq + 0.5) + 1.0)
             
             # 计算TF
             tf = freq
@@ -188,7 +210,18 @@ class TFSparseVectorService(BaseSparseVectorService):
         token_freq = Counter(tokens)
         doc_length = len(tokens)
         
-        # 计算TF-IDF权重
+        # 如果没有语料库统计（调试模式），使用简化的TF-IDF
+        if self.doc_count == 0:
+            # 调试模式：只使用TF权重
+            sparse_vector = {}
+            for token, freq in token_freq.items():
+                # 简化的TF计算（归一化词频）
+                tf = freq / doc_length if doc_length > 0 else 0
+                if tf > 0:
+                    sparse_vector[token] = tf
+            return sparse_vector
+        
+        # 标准TF-IDF计算（有语料库统计）
         sparse_vector = {}
         for token, freq in token_freq.items():
             # 计算TF (词频)
@@ -196,10 +229,11 @@ class TFSparseVectorService(BaseSparseVectorService):
             
             # 计算IDF (逆文档频率)
             doc_freq = self.token_doc_freq.get(token, 0)
-            if doc_freq == 0 or self.doc_count == 0:
-                continue
-                
-            idf = math.log(self.doc_count / doc_freq)
+            if doc_freq == 0:
+                # 如果token不在语料库中，使用默认IDF
+                idf = math.log(self.doc_count + 1)
+            else:
+                idf = math.log(self.doc_count / doc_freq)
             
             # TF-IDF分数
             score = tf * idf

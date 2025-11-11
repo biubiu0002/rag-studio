@@ -13,7 +13,14 @@ from app.config import settings
 # 尝试导入 Qdrant 客户端
 try:
     from qdrant_client import QdrantClient
-    from qdrant_client.models import VectorParams, Distance, PointStruct
+    from qdrant_client.models import (
+        VectorParams, Distance, PointStruct, 
+        HnswConfigDiff, OptimizersConfigDiff,
+        ScalarQuantization, ScalarQuantizationConfig, ScalarType,
+        ProductQuantization, ProductQuantizationConfig,
+        BinaryQuantization, BinaryQuantizationConfig,
+        QuantizationConfig as QdrantQuantizationConfig
+    )
     QDRANT_AVAILABLE = True
 except ImportError:
     QDRANT_AVAILABLE = False
@@ -115,8 +122,32 @@ class ElasticsearchService(BaseVectorDBService):
     3. 实现向量检索
     """
     
-    def __init__(self):
-        self.url = settings.elasticsearch_url
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """
+        初始化Elasticsearch服务
+        
+        Args:
+            config: 向量数据库配置字典，可包含：
+                - host: ES主机地址
+                - port: ES端口
+                - user: ES用户名
+                - password: ES密码
+                - url: ES完整URL
+        """
+        if config:
+            if "url" in config and config["url"]:
+                self.url = config["url"]
+            else:
+                host = config.get("host") or settings.ES_HOST
+                port = config.get("port") or settings.ES_PORT
+                user = config.get("user") or settings.ES_USER
+                password = config.get("password") or settings.ES_PASSWORD
+                if user and password:
+                    self.url = f"http://{user}:{password}@{host}:{port}"
+                else:
+                    self.url = f"http://{host}:{port}"
+        else:
+            self.url = settings.elasticsearch_url
     
     async def create_collection(self, collection_name: str, dimension: int, **kwargs):
         """创建ES索引（待实现）"""
@@ -173,13 +204,49 @@ class QdrantService(BaseVectorDBService):
     Qdrant向量数据库服务
     """
     
-    def __init__(self):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """
+        初始化Qdrant服务
+        
+        Args:
+            config: 向量数据库配置字典，可包含：
+                - host: Qdrant主机地址（默认从settings读取）
+                - port: Qdrant端口（默认从settings读取）
+                - api_key: Qdrant API密钥（可选）
+                - url: Qdrant完整URL（如果提供，会覆盖host和port）
+        """
         if not QDRANT_AVAILABLE:
             raise ImportError("qdrant-client is not installed. Please install it with: pip install qdrant-client")
         
-        self.host = settings.QDRANT_HOST
-        self.port = settings.QDRANT_PORT
-        self.api_key = settings.QDRANT_API_KEY
+        # 从配置或settings读取连接信息
+        if config:
+            # 如果提供了完整URL，使用URL
+            if "url" in config and config["url"]:
+                url = config["url"]
+                # 解析URL
+                if url.startswith("http://") or url.startswith("https://"):
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url)
+                    self.host = parsed.hostname or settings.QDRANT_HOST
+                    self.port = parsed.port or settings.QDRANT_PORT
+                    # 从URL中提取API key（如果有）
+                    self.api_key = config.get("api_key") or settings.QDRANT_API_KEY
+                else:
+                    # 假设是 host:port 格式
+                    parts = url.split(":")
+                    self.host = parts[0] if len(parts) > 0 else settings.QDRANT_HOST
+                    self.port = int(parts[1]) if len(parts) > 1 else settings.QDRANT_PORT
+                    self.api_key = config.get("api_key") or settings.QDRANT_API_KEY
+            else:
+                # 使用配置中的host和port
+                self.host = config.get("host") or settings.QDRANT_HOST
+                self.port = config.get("port") or settings.QDRANT_PORT
+                self.api_key = config.get("api_key") or settings.QDRANT_API_KEY
+        else:
+            # 使用默认配置
+            self.host = settings.QDRANT_HOST
+            self.port = settings.QDRANT_PORT
+            self.api_key = settings.QDRANT_API_KEY
         
         # 初始化 Qdrant 客户端
         from qdrant_client import QdrantClient
@@ -196,7 +263,7 @@ class QdrantService(BaseVectorDBService):
         self.PointStruct = PointStruct
     
     async def create_collection(self, collection_name: str, dimension: int, **kwargs):
-        """创建Qdrant集合"""
+        """创建Qdrant集合，支持完整的schema配置"""
         # 检查集合是否已存在
         try:
             existing_collection = self.client.get_collection(collection_name)
@@ -233,28 +300,125 @@ class QdrantService(BaseVectorDBService):
         schema_fields = kwargs.get('schema_fields', [])
         
         # 构建Qdrant的向量配置
-        from qdrant_client.models import VectorParams, Distance
-        vectors_config = VectorParams(size=dimension, distance=Distance.COSINE)
+        from qdrant_client.models import VectorParams, Distance, SparseVectorParams
         
-        # 检查是否需要创建稀疏向量配置
-        sparse_vectors_config = {}
-        has_sparse_vector = False
+        # 查找向量字段和稀疏向量字段
+        dense_vector_fields = []
+        sparse_vector_fields = []
+        
         for field in schema_fields:
-            if field.get("isSparseVectorIndex") or field.get("type") == "sparse_vector":
-                vector_name = field.get("name", "sparse")
-                # 使用SparseVectorParams创建稀疏向量配置
-                from qdrant_client.models import SparseVectorParams
-                sparse_vectors_config[vector_name] = SparseVectorParams()
-                has_sparse_vector = True
+            if field.get("type") == "dense_vector":
+                dense_vector_fields.append(field)
+            elif field.get("type") == "sparse_vector":
+                sparse_vector_fields.append(field)
+        
+        # 构建稠密向量配置
+        vectors_config = {}
+        has_named_vectors = False
+        
+        if dense_vector_fields:
+            for field in dense_vector_fields:
+                field_name = field.get("name", "dense")
+                field_dimension = field.get("dimension", dimension)
+                
+                # 获取距离度量
+                distance_str = field.get("distance", "Cosine")
+                distance_map = {
+                    "Cosine": Distance.COSINE,
+                    "Euclid": Distance.EUCLID,
+                    "Dot": Distance.DOT,
+                    "Manhattan": Distance.MANHATTAN
+                }
+                distance = distance_map.get(distance_str, Distance.COSINE)
+                
+                # 获取HNSW配置
+                hnsw_config = field.get("hnsw", {})
+                hnsw_config_diff = None
+                if hnsw_config:
+                    hnsw_config_diff = HnswConfigDiff(
+                        m=hnsw_config.get("m", 16),
+                        ef_construct=hnsw_config.get("ef_construct", 100),
+                        full_scan_threshold=hnsw_config.get("full_scan_threshold", 10000),
+                        on_disk=hnsw_config.get("on_disk", False)
+                    )
+                
+                # 获取量化配置
+                quantization_config = field.get("quantization")
+                qdrant_quantization = None
+                if quantization_config and quantization_config.get("type"):
+                    quant_type = quantization_config["type"]
+                    always_ram = quantization_config.get("always_ram", False)
+                    
+                    if quant_type == "scalar":
+                        qdrant_quantization = ScalarQuantization(
+                            scalar=ScalarQuantizationConfig(
+                                type=ScalarType.INT8,
+                                always_ram=always_ram
+                            )
+                        )
+                    elif quant_type == "product":
+                        qdrant_quantization = ProductQuantization(
+                            product=ProductQuantizationConfig(
+                                compression=16,  # 默认压缩比
+                                always_ram=always_ram
+                            )
+                        )
+                    elif quant_type == "binary":
+                        qdrant_quantization = BinaryQuantization(
+                            binary=BinaryQuantizationConfig(
+                                always_ram=always_ram
+                            )
+                        )
+                
+                # 获取磁盘存储配置
+                on_disk = field.get("on_disk", False)
+                
+                # 创建向量参数
+                vector_params = VectorParams(
+                    size=field_dimension,
+                    distance=distance,
+                    hnsw_config=hnsw_config_diff,
+                    quantization_config=qdrant_quantization,
+                    on_disk=on_disk
+                )
+                
+                vectors_config[field_name] = vector_params
+                has_named_vectors = True
+        else:
+            # 如果没有定义向量字段，使用默认配置
+            vectors_config = VectorParams(
+                size=dimension,
+                distance=Distance.COSINE
+            )
+        
+        # 构建稀疏向量配置
+        sparse_vectors_config = {}
+        has_sparse_vectors = False
+        
+        for field in sparse_vector_fields:
+            vector_name = field.get("name", "sparse_vector")
+            # Qdrant的稀疏向量参数很简单，不需要太多配置
+            sparse_vectors_config[vector_name] = SparseVectorParams()
+            has_sparse_vectors = True
         
         # 创建新的集合
-        if has_sparse_vector:
-            # 如果有稀疏向量配置，需要使用字典形式的向量配置
-            self.client.create_collection(
-                collection_name=collection_name,
-                vectors_config={"dense": vectors_config},  # 将稠密向量命名为"dense"
-                sparse_vectors_config=sparse_vectors_config
-            )
+        if has_sparse_vectors or has_named_vectors:
+            # 如果有稀疏向量配置或命名向量，需要使用字典形式的向量配置
+            if not has_named_vectors:
+                # 如果只有稀疏向量，还需要添加默认的稠密向量
+                vectors_config = {
+                    "dense": VectorParams(size=dimension, distance=Distance.COSINE)
+                }
+            
+            # 创建集合参数
+            create_params = {
+                "collection_name": collection_name,
+                "vectors_config": vectors_config,
+            }
+            if has_sparse_vectors:
+                create_params["sparse_vectors_config"] = sparse_vectors_config
+            
+            self.client.create_collection(**create_params)
         else:
             # 如果没有稀疏向量配置，使用简单的向量配置
             self.client.create_collection(
@@ -262,20 +426,35 @@ class QdrantService(BaseVectorDBService):
                 vectors_config=vectors_config
             )
         
-        # 为标量字段创建索引
+        # 为标量字段创建payload索引
         for field in schema_fields:
-            if field.get("isIndexed") and not field.get("isVectorIndex"):
+            if field.get("isIndexed") and not field.get("isVectorIndex") and not field.get("isSparseVectorIndex"):
                 field_name = field["name"]
                 field_type = field["type"]
                 
                 # 创建字段索引
-                # 注意：Qdrant的索引创建方式可能需要根据版本调整
                 try:
-                    # 这里我们只是记录需要创建索引的字段
-                    # 实际的索引创建会在数据插入时进行
-                    pass
+                    # Qdrant会在数据插入时自动为payload字段创建索引
+                    # 我们也可以显式创建索引
+                    from qdrant_client.models import PayloadSchemaType
+                    
+                    # 根据字段类型选择索引类型
+                    if field_type == "keyword":
+                        schema_type = PayloadSchemaType.KEYWORD
+                    elif field_type == "number":
+                        schema_type = PayloadSchemaType.INTEGER
+                    elif field_type == "boolean":
+                        schema_type = PayloadSchemaType.BOOL
+                    else:
+                        schema_type = PayloadSchemaType.TEXT
+                    
+                    self.client.create_payload_index(
+                        collection_name=collection_name,
+                        field_name=field_name,
+                        field_schema=schema_type
+                    )
                 except Exception as e:
-                    print(f"Warning: Failed to create index for field {field_name}: {e}")
+                    print(f"Warning: Failed to create payload index for field {field_name}: {e}")
     
     async def delete_collection(self, collection_name: str):
         """删除集合"""
@@ -341,15 +520,23 @@ class QdrantService(BaseVectorDBService):
             # 处理向量格式 - 支持命名向量和稀疏向量
             processed_vector: Union[List[float], Dict[str, Union[List[float], Any]]] = vector
             if use_named_vectors:
-                # 如果是字典格式且包含稀疏向量，则直接使用
-                if isinstance(vector, dict) and any(key in vector for key in ["sparse", "sparse_vector"]):
+                # 如果已经是字典格式，直接使用（假设前端/API已经正确构建）
+                if isinstance(vector, dict):
                     processed_vector = vector
-                # 如果是普通向量，包装为稠密向量
+                    # 调试日志：显示向量字段
+                    if i == 0:  # 只打印第一个点的信息
+                        print(f"Insert vector {i}: Using dict format with keys: {list(vector.keys())}")
+                        for key, val in vector.items():
+                            if isinstance(val, dict) and 'indices' in val and 'values' in val:
+                                print(f"  - {key}: sparse vector with {len(val['indices'])} non-zero elements")
+                            elif isinstance(val, list):
+                                print(f"  - {key}: dense vector with dimension {len(val)}")
+                # 如果是普通向量列表，包装为命名向量（默认使用"dense"）
                 elif isinstance(vector, list):
                     processed_vector = {"dense": vector}
-                # 如果是字典但不包含稀疏向量，添加稠密向量
-                elif isinstance(vector, dict):
-                    processed_vector = {"dense": vector.get("dense", []), **vector}
+                else:
+                    # 其他情况，尝试转换为列表并包装
+                    processed_vector = {"dense": list(vector) if not isinstance(vector, list) else vector}
             
             point = self.PointStruct(
                 id=point_id,
@@ -395,11 +582,14 @@ class QdrantService(BaseVectorDBService):
         collection_name: str,
         query_vector: List[float],
         top_k: int = 5,
-        score_threshold: float = 0.0
+        score_threshold: float = 0.0,
+        vector_name: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """检索"""
+        """检索，支持命名向量"""
         # 检查集合配置，确定是否使用命名向量
         use_named_vectors = False
+        actual_vector_name = vector_name or "dense"
+        
         try:
             collection_info = self.client.get_collection(collection_name)
             if hasattr(collection_info, 'config') and hasattr(collection_info.config, 'params'):
@@ -407,6 +597,9 @@ class QdrantService(BaseVectorDBService):
                 # 如果是字典形式的向量配置，说明使用了命名向量
                 if isinstance(vectors_config, dict):
                     use_named_vectors = True
+                    # 如果没有指定向量名称，使用第一个可用的向量
+                    if not vector_name:
+                        actual_vector_name = next(iter(vectors_config.keys()), "dense")
         except Exception:
             # 如果无法获取集合信息，默认不使用命名向量
             pass
@@ -416,7 +609,7 @@ class QdrantService(BaseVectorDBService):
             # 对于命名向量，需要指定向量名称
             search_result = self.client.search(
                 collection_name=collection_name,
-                query_vector=("dense", query_vector),  # 使用元组格式指定向量名称和向量
+                query_vector=(actual_vector_name, query_vector),  # 使用元组格式指定向量名称和向量
                 limit=top_k,
                 score_threshold=score_threshold
             )
@@ -448,7 +641,9 @@ class QdrantService(BaseVectorDBService):
         query_sparse_vector: Optional[Dict[str, Any]] = None,
         top_k: int = 5,
         score_threshold: float = 0.0,
-        fusion: str = "rrf"
+        fusion: str = "rrf",
+        dense_vector_name: str = "dense",
+        sparse_vector_name: str = "sparse_vector"
     ) -> List[Dict[str, Any]]:
         """
         Qdrant原生混合检索（稠密向量+稀疏向量）
@@ -460,6 +655,8 @@ class QdrantService(BaseVectorDBService):
             top_k: 返回数量
             score_threshold: 分数阈值
             fusion: 融合方法 ("rrf" 或 "dbsf")
+            dense_vector_name: 稠密向量字段名称
+            sparse_vector_name: 稀疏向量字段名称
             
         Returns:
             检索结果列表
@@ -468,13 +665,30 @@ class QdrantService(BaseVectorDBService):
             from qdrant_client.models import Fusion, Prefetch
         except ImportError:
             # 如果Qdrant客户端版本不支持混合检索，回退到普通向量检索
-            return await self.search(collection_name, query_vector, top_k, score_threshold)
+            return await self.search(collection_name, query_vector, top_k, score_threshold, dense_vector_name)
+        
+        # 从集合配置中获取实际的向量字段名称
+        try:
+            collection_info = self.client.get_collection(collection_name)
+            if hasattr(collection_info, 'config') and hasattr(collection_info.config, 'params'):
+                vectors_config = collection_info.config.params.vectors
+                if isinstance(vectors_config, dict):
+                    # 获取第一个稠密向量字段名称
+                    dense_vector_name = next(iter(vectors_config.keys()), dense_vector_name)
+                
+                # 获取稀疏向量字段名称
+                if hasattr(collection_info.config.params, 'sparse_vectors'):
+                    sparse_vectors_config = collection_info.config.params.sparse_vectors
+                    if isinstance(sparse_vectors_config, dict) and len(sparse_vectors_config) > 0:
+                        sparse_vector_name = next(iter(sparse_vectors_config.keys()), sparse_vector_name)
+        except Exception as e:
+            print(f"Warning: Failed to get collection config: {e}")
         
         # 构建预取查询
         prefetch = [
             Prefetch(
                 query=query_vector,
-                using="dense",  # 假设稠密向量使用"dense"名称
+                using=dense_vector_name,
                 limit=top_k * 2  # 获取更多候选结果
             )
         ]
@@ -490,13 +704,13 @@ class QdrantService(BaseVectorDBService):
                 prefetch.append(
                     Prefetch(
                         query=sparse_vector,
-                        using="sparse",  # 假设稀疏向量使用"sparse"名称
+                        using=sparse_vector_name,
                         limit=top_k * 2
                     )
                 )
-            except Exception:
+            except Exception as e:
                 # 如果稀疏向量格式不正确，忽略稀疏向量检索
-                pass
+                print(f"Warning: Failed to create sparse vector prefetch: {e}")
         
         # 执行混合检索
         try:
@@ -525,7 +739,7 @@ class QdrantService(BaseVectorDBService):
         except Exception as e:
             # 如果混合检索失败，回退到普通向量检索
             print(f"Hybrid search failed, falling back to vector search: {e}")
-            return await self.search(collection_name, query_vector, top_k, score_threshold)
+            return await self.search(collection_name, query_vector, top_k, score_threshold, dense_vector_name)
     
     async def delete_vectors(self, collection_name: str, ids: List[str]):
         """删除向量"""
@@ -576,7 +790,17 @@ class MilvusService(BaseVectorDBService):
     Milvus向量数据库服务
     """
     
-    def __init__(self):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """
+        初始化Milvus服务
+        
+        Args:
+            config: 向量数据库配置字典，可包含：
+                - host: Milvus主机地址
+                - port: Milvus端口
+                - user: Milvus用户名
+                - password: Milvus密码
+        """
         # 尝试导入 Milvus 客户端
         try:
             import importlib
@@ -587,12 +811,30 @@ class MilvusService(BaseVectorDBService):
             print("Warning: pymilvus not installed. Milvus functionality will be disabled.")
             return
         
-        self.host = settings.MILVUS_HOST
-        self.port = settings.MILVUS_PORT
+        # 从配置或settings读取连接信息
+        if config:
+            self.host = config.get("host") or settings.MILVUS_HOST
+            self.port = config.get("port") or settings.MILVUS_PORT
+            self.user = config.get("user") or settings.MILVUS_USER
+            self.password = config.get("password") or settings.MILVUS_PASSWORD
+        else:
+            self.host = settings.MILVUS_HOST
+            self.port = settings.MILVUS_PORT
+            self.user = settings.MILVUS_USER
+            self.password = settings.MILVUS_PASSWORD
         
         # 连接 Milvus
         try:
-            self.pymilvus.connections.connect("default", host=self.host, port=self.port)
+            if self.user and self.password:
+                self.pymilvus.connections.connect(
+                    "default", 
+                    host=self.host, 
+                    port=self.port,
+                    user=self.user,
+                    password=self.password
+                )
+            else:
+                self.pymilvus.connections.connect("default", host=self.host, port=self.port)
         except Exception as e:
             print(f"Warning: Failed to connect to Milvus: {e}")
     
@@ -620,19 +862,18 @@ class MilvusService(BaseVectorDBService):
             field_type = field["type"]
             
             # 跳过向量字段，因为我们已经定义了主向量字段
-            if field.get("isVectorIndex"):
+            if field_type in ["dense_vector", "sparse_vector"]:
                 continue
             
             # 根据字段类型添加字段
             if field_type == "text" or field_type == "keyword":
                 fields.append(self.pymilvus.FieldSchema(name=field_name, dtype=self.pymilvus.DataType.VARCHAR, max_length=65535))
-            elif field_type == "number":
+            elif field_type == "integer":
                 fields.append(self.pymilvus.FieldSchema(name=field_name, dtype=self.pymilvus.DataType.INT64))
+            elif field_type == "float":
+                fields.append(self.pymilvus.FieldSchema(name=field_name, dtype=self.pymilvus.DataType.FLOAT))
             elif field_type == "boolean":
                 fields.append(self.pymilvus.FieldSchema(name=field_name, dtype=self.pymilvus.DataType.BOOL))
-            elif field_type == "array":
-                # Milvus对数组的支持有限，我们将其作为VARCHAR存储
-                fields.append(self.pymilvus.FieldSchema(name=field_name, dtype=self.pymilvus.DataType.VARCHAR, max_length=65535))
         
         # 创建集合schema
         schema = self.pymilvus.CollectionSchema(fields=fields, description=f"Collection for {collection_name}")
@@ -830,21 +1071,22 @@ class VectorDBServiceFactory:
     """向量数据库服务工厂"""
     
     @staticmethod
-    def create(db_type: VectorDBType) -> BaseVectorDBService:
+    def create(db_type: VectorDBType, config: Optional[Dict[str, Any]] = None) -> BaseVectorDBService:
         """
         创建向量数据库服务实例
         
         Args:
             db_type: 数据库类型
+            config: 向量数据库配置字典（可选）
         
         Returns:
             向量数据库服务实例
         """
         if db_type == VectorDBType.ELASTICSEARCH:
-            return ElasticsearchService()
+            return ElasticsearchService(config=config)
         elif db_type == VectorDBType.QDRANT:
-            return QdrantService()
+            return QdrantService(config=config)
         elif db_type == VectorDBType.MILVUS:
-            return MilvusService()
+            return MilvusService(config=config)
         else:
             raise ValueError(f"不支持的向量数据库类型: {db_type}")
