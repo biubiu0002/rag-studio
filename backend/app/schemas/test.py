@@ -16,13 +16,30 @@ class TestSetCreate(BaseModel):
     kb_id: str = Field(..., description="关联知识库ID")
     test_type: TestType = Field(..., description="测试类型")
     
+    # 配置快照（可选，如果不提供则从知识库获取）
+    kb_config: Optional[Dict[str, Any]] = Field(None, description="知识库配置快照")
+    chunking_config: Optional[Dict[str, Any]] = Field(None, description="分块策略配置")
+    embedding_config: Optional[Dict[str, Any]] = Field(None, description="嵌入模型参数配置")
+    sparse_vector_config: Optional[Dict[str, Any]] = Field(None, description="稀疏向量参数配置")
+    index_config: Optional[Dict[str, Any]] = Field(None, description="索引配置")
+    
     class Config:
         json_schema_extra = {
             "example": {
-                "name": "Python问答测试集",
-                "description": "测试Python相关问题的检索效果",
+                "name": "t2ranking_seed42_1000",
+                "description": "T2Ranking数据集，随机种子42，前1000个问题",
                 "kb_id": "kb_001",
-                "test_type": "retrieval"
+                "test_type": "retrieval",
+                "kb_config": {
+                    "vector_db_type": "qdrant",
+                    "embedding_provider": "ollama",
+                    "embedding_model": "bge-m3:latest"
+                },
+                "chunking_config": {
+                    "method": "fixed_size",
+                    "chunk_size": 500,
+                    "chunk_overlap": 50
+                }
             }
         }
 

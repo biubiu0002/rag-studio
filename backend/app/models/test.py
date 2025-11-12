@@ -35,15 +35,47 @@ class TestSet(BaseModelMixin):
     # 统计信息
     case_count: int = Field(default=0, description="测试用例数量")
     
+    # 配置快照（索引写入前的完整配置）
+    kb_config: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="知识库配置快照（包含vector_db_type, embedding_provider, embedding_model等）"
+    )
+    chunking_config: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="分块策略配置（chunk_size, chunk_overlap, chunk_method等）"
+    )
+    embedding_config: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="嵌入模型参数配置（model, dimension, provider等）"
+    )
+    sparse_vector_config: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="稀疏向量参数配置（method: bm25/tf-idf/simple/splade, k1, b等）"
+    )
+    index_config: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="索引配置（schema_fields, vector_db_config等）"
+    )
+    
     class Config:
         json_schema_extra = {
             "example": {
                 "id": "ts_001",
-                "name": "Python问答测试集",
-                "description": "测试Python相关问题的检索效果",
+                "name": "t2ranking_seed42_1000",
+                "description": "T2Ranking数据集，随机种子42，前1000个问题",
                 "kb_id": "kb_001",
                 "test_type": "retrieval",
-                "case_count": 100
+                "case_count": 1000,
+                "kb_config": {
+                    "vector_db_type": "qdrant",
+                    "embedding_provider": "ollama",
+                    "embedding_model": "bge-m3:latest"
+                },
+                "chunking_config": {
+                    "method": "fixed_size",
+                    "chunk_size": 500,
+                    "chunk_overlap": 50
+                }
             }
         }
 

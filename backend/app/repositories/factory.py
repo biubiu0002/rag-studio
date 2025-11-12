@@ -94,4 +94,22 @@ class RepositoryFactory:
         """创建检索器评估结果仓储"""
         from app.models.retriever_evaluation import RetrieverEvaluationResult
         return RepositoryFactory.create(RetrieverEvaluationResult, "retriever_evaluations")
+    
+    @staticmethod
+    def create_evaluation_task_repository():
+        """创建评估任务仓储"""
+        from app.models.evaluation import EvaluationTask
+        return RepositoryFactory.create(EvaluationTask, "evaluation_tasks")
+    
+    @staticmethod
+    def create_evaluation_case_result_repository():
+        """创建评估用例结果仓储"""
+        from app.models.evaluation import EvaluationCaseResult
+        return RepositoryFactory.create(EvaluationCaseResult, "evaluation_case_results")
+    
+    @staticmethod
+    def create_evaluation_summary_repository():
+        """创建评估汇总仓储"""
+        from app.models.evaluation import EvaluationSummary
+        return RepositoryFactory.create(EvaluationSummary, "evaluation_summaries")
 

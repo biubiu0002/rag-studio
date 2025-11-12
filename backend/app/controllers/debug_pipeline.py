@@ -1633,7 +1633,7 @@ class GenerationRequest(BaseModel):
     kb_id: Optional[str] = Field(None, description="知识库ID（如果需要自动检索上下文）")
     stream: bool = Field(False, description="是否启用流式输出")
     llm_provider: str = Field("ollama", description="LLM服务提供商")
-    llm_model: str = Field("deepseek-v3", description="LLM模型")
+    llm_model: str = Field("deepseek-r1:1.5b", description="LLM模型")
     temperature: float = Field(0.7, description="生成参数：温度", ge=0, le=1)
     max_tokens: Optional[int] = Field(None, description="最大生成token数")
 
@@ -1730,7 +1730,7 @@ async def generate(request: GenerationRequest):
 async def call_llm(
     prompt: str,
     provider: str = "ollama",
-    model: str = "deepseek-v3",
+    model: str = "deepseek-r1:1.5b",
     temperature: float = 0.7,
     max_tokens: Optional[int] = None,
     stream: bool = False

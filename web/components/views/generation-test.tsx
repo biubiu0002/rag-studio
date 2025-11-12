@@ -18,7 +18,7 @@ export default function GenerationTestView() {
   // 配置状态
   const [llmConfig, setLlmConfig] = useState({
     provider: "ollama" as "ollama",
-    model: "deepseek-v3",
+    model: "deepseek-r1:1.5b",
     temperature: 0.7,
     max_tokens: 2000,
     stream: true

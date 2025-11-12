@@ -1,7 +1,7 @@
 # Web Framework
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
-pydantic==2.5.0
+pydantic>=2.5.0
 pydantic-settings==2.1.0
 
 # Database
@@ -20,6 +20,7 @@ ollama==0.1.6
 ragas==0.1.9
 datasets==2.16.1
 pandas==2.1.4
+rapidfuzz>=3.0.0  # 非 LLM 版本的 RAGAS 指标需要此库
 
 # Vector Databases (可选安装，根据需要选择)
 # elasticsearch==8.11.1

@@ -606,7 +606,7 @@ export default function KnowledgeBaseConfig() {
               <div className="space-y-6">
                 {/* Qdrant配置摘要卡片 */}
                 {vectorDbType === "qdrant" && schemaFields.length > 0 && (
-                  <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
+                  <Card className="bg-linear-to-r from-blue-50 to-indigo-50 border-blue-200">
                     <CardHeader>
                       <CardTitle className="text-sm font-medium text-blue-900 flex items-center gap-2">
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1369,7 +1369,7 @@ export default function KnowledgeBaseConfig() {
                 </SelectTrigger>
                 <SelectContent>
                   {savedSchemas.length === 0 ? (
-                    <SelectItem value="" disabled>暂无已保存的Schema</SelectItem>
+                    <div className="px-2 py-1.5 text-sm text-gray-500">暂无已保存的Schema</div>
                   ) : (
                     savedSchemas.map((schema) => (
                       <SelectItem key={schema.id} value={schema.id}>

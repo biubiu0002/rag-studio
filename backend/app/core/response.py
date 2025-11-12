@@ -57,6 +57,14 @@ class PageResponse(BaseModel, Generic[T]):
         )
 
 
+class ErrorResponse(BaseModel):
+    """错误响应模型"""
+    
+    success: bool = Field(default=False, description="请求是否成功")
+    message: str = Field(..., description="错误消息")
+    data: Optional[Any] = Field(default=None, description="错误详情（可选）")
+
+
 def success_response(data: Any = None, message: Optional[str] = None) -> dict:
     """
     创建成功响应
@@ -95,4 +103,18 @@ def page_response(
         page=page,
         page_size=page_size,
     ).model_dump()
+
+
+def error_response(message: str, data: Any = None) -> dict:
+    """
+    创建错误响应
+    
+    Args:
+        message: 错误消息
+        data: 错误详情（可选）
+    
+    Returns:
+        错误响应字典
+    """
+    return ErrorResponse(message=message, data=data).model_dump()
 

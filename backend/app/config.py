@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     # Ollama配置
     OLLAMA_BASE_URL: str = Field(default="http://localhost:11434", description="Ollama服务地址")
     OLLAMA_EMBEDDING_MODEL: str = Field(default="nomic-embed-text", description="嵌入模型")
-    OLLAMA_CHAT_MODEL: str = Field(default="qwen2:7b", description="对话模型")
+    OLLAMA_CHAT_MODEL: str = Field(default="deepseek-r1:1.5b", description="对话模型（确保模型在Ollama中存在，评估任务会使用任务配置中的llm_model）")
     
     # 自研服务配置（预留）
     CUSTOM_SERVICE_URL: str = Field(default="", description="自研服务地址")

@@ -333,6 +333,34 @@ export interface TestSet {
   updated_at: string
 }
 
+export interface TestSet {
+  id: string
+  name: string
+  description?: string
+  kb_id: string
+  test_type: 'retrieval' | 'generation'
+  case_count: number
+  kb_config?: Record<string, any>
+  chunking_config?: Record<string, any>
+  embedding_config?: Record<string, any>
+  sparse_vector_config?: Record<string, any>
+  index_config?: Record<string, any>
+  created_at: string
+  updated_at: string
+}
+
+export interface TestCase {
+  id: string
+  test_set_id: string
+  kb_id: string
+  query: string
+  expected_chunks?: string[]
+  expected_answer?: string
+  metadata?: Record<string, any>
+  created_at: string
+  updated_at: string
+}
+
 /**
  * 测试API
  */
@@ -345,8 +373,13 @@ export const testAPI = {
     description?: string
     kb_id: string
     test_type: 'retrieval' | 'generation'
+    kb_config?: Record<string, any>
+    chunking_config?: Record<string, any>
+    embedding_config?: Record<string, any>
+    sparse_vector_config?: Record<string, any>
+    index_config?: Record<string, any>
   }) => {
-    return request<{ success: boolean; data: TestSet; message: string }>(
+    return request<{ success: boolean; data: { id: string }; message: string }>(
       '/tests/test-sets',
       {
         method: 'POST',
@@ -358,7 +391,7 @@ export const testAPI = {
   /**
    * 获取测试集列表
    */
-  listTestSets: async (kbId?: string, page = 1, pageSize = 20) => {
+  listTestSets: async (kbId?: string, testType?: string, page = 1, pageSize = 20) => {
     const params = new URLSearchParams({
       page: page.toString(),
       page_size: pageSize.toString(),
@@ -366,12 +399,131 @@ export const testAPI = {
     if (kbId) {
       params.append('kb_id', kbId)
     }
+    if (testType) {
+      params.append('test_type', testType)
+    }
     
     return request<{
       success: boolean
       data: TestSet[]
       total: number
+      page: number
+      page_size: number
     }>(`/tests/test-sets?${params}`)
+  },
+
+  /**
+   * 获取测试集详情
+   */
+  getTestSet: async (id: string) => {
+    return request<{ success: boolean; data: TestSet }>(
+      `/tests/test-sets/${id}`
+    )
+  },
+
+  /**
+   * 更新测试集
+   */
+  updateTestSet: async (id: string, data: {
+    name?: string
+    description?: string
+  }) => {
+    return request<{ success: boolean; message: string }>(
+      `/tests/test-sets/${id}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }
+    )
+  },
+
+  /**
+   * 删除测试集
+   */
+  deleteTestSet: async (id: string) => {
+    return request<{ success: boolean; message: string }>(
+      `/tests/test-sets/${id}`,
+      {
+        method: 'DELETE',
+      }
+    )
+  },
+
+  /**
+   * 创建测试用例
+   */
+  createTestCase: async (data: {
+    test_set_id: string
+    query: string
+    expected_chunks?: string[]
+    expected_answer?: string
+    metadata?: Record<string, any>
+  }) => {
+    return request<{ success: boolean; data: { id: string }; message: string }>(
+      '/tests/test-cases',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    )
+  },
+
+  /**
+   * 获取测试用例列表
+   */
+  listTestCases: async (testSetId: string, page = 1, pageSize = 20) => {
+    const params = new URLSearchParams({
+      test_set_id: testSetId,
+      page: page.toString(),
+      page_size: pageSize.toString(),
+    })
+    
+    return request<{
+      success: boolean
+      data: TestCase[]
+      total: number
+      page: number
+      page_size: number
+    }>(`/tests/test-cases?${params}`)
+  },
+
+  /**
+   * 获取测试用例详情
+   */
+  getTestCase: async (id: string) => {
+    return request<{ success: boolean; data: TestCase }>(
+      `/tests/test-cases/${id}`
+    )
+  },
+
+  /**
+   * 更新测试用例
+   */
+  updateTestCase: async (id: string, data: {
+    query?: string
+    expected_chunks?: string[]
+    expected_answer?: string
+    metadata?: Record<string, any>
+  }) => {
+    return request<{ success: boolean; message: string }>(
+      `/tests/test-cases/${id}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }
+    )
+  },
+
+  /**
+   * 删除测试用例
+   */
+  deleteTestCase: async (id: string) => {
+    return request<{ success: boolean; message: string }>(
+      `/tests/test-cases/${id}`,
+      {
+        method: 'DELETE',
+      }
+    )
   },
 }
 
@@ -512,6 +664,165 @@ export const retrieverEvalAPI = {
     
     return request<{ success: boolean; data: any }>(
       `/retriever-evaluation/compare-evaluations?${params}`
+    )
+  },
+}
+
+// ========== 评估任务相关API ==========
+
+export interface EvaluationTask {
+  id: string
+  test_set_id: string
+  kb_id: string
+  evaluation_type: 'retrieval' | 'generation'
+  task_name?: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  retrieval_config?: Record<string, any>
+  generation_config?: Record<string, any>
+  total_cases: number
+  completed_cases: number
+  failed_cases: number
+  started_at?: string
+  completed_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface EvaluationSummary {
+  id: string
+  evaluation_task_id: string
+  overall_retrieval_metrics?: Record<string, number>
+  overall_ragas_retrieval_metrics?: Record<string, number>
+  overall_ragas_generation_metrics?: Record<string, number>
+  overall_ragas_score?: number
+  metrics_distribution?: Record<string, any>
+  created_at: string
+  updated_at: string
+}
+
+export interface EvaluationCaseResult {
+  id: string
+  evaluation_task_id: string
+  test_case_id: string
+  query: string
+  retrieved_chunks?: any[]
+  generated_answer?: string
+  retrieval_time?: number
+  generation_time?: number
+  retrieval_metrics?: Record<string, number>
+  ragas_retrieval_metrics?: Record<string, number>
+  ragas_generation_metrics?: Record<string, number>
+  ragas_score?: number
+  status: 'pending' | 'completed' | 'failed'
+  error_message?: string
+  created_at: string
+}
+
+/**
+ * 评估任务API
+ */
+export const evaluationAPI = {
+  /**
+   * 创建评估任务
+   */
+  createTask: async (data: {
+    test_set_id: string
+    evaluation_type: 'retrieval' | 'generation'
+    task_name?: string
+    retrieval_config?: Record<string, any>
+    generation_config?: Record<string, any>
+  }) => {
+    return request<{ success: boolean; data: { id: string }; message: string }>(
+      '/evaluation/tasks',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    )
+  },
+
+  /**
+   * 执行评估任务
+   */
+  executeTask: async (taskId: string, saveDetailedResults = true) => {
+    return request<{ success: boolean; data: EvaluationTask; message: string }>(
+      `/evaluation/tasks/${taskId}/execute`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ save_detailed_results: saveDetailedResults }),
+      }
+    )
+  },
+
+  /**
+   * 获取评估任务列表
+   */
+  listTasks: async (
+    testSetId?: string,
+    kbId?: string,
+    status?: string,
+    page = 1,
+    pageSize = 20
+  ) => {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+    })
+    if (testSetId) params.append('test_set_id', testSetId)
+    if (kbId) params.append('kb_id', kbId)
+    if (status) params.append('status', status)
+    
+    return request<{
+      success: boolean
+      data: EvaluationTask[]
+      total: number
+      page: number
+      page_size: number
+    }>(`/evaluation/tasks?${params}`)
+  },
+
+  /**
+   * 获取评估任务详情
+   */
+  getTask: async (taskId: string) => {
+    return request<{ success: boolean; data: EvaluationTask }>(
+      `/evaluation/tasks/${taskId}`
+    )
+  },
+
+  /**
+   * 获取评估汇总
+   */
+  getSummary: async (taskId: string) => {
+    return request<{ success: boolean; data: EvaluationSummary }>(
+      `/evaluation/tasks/${taskId}/summary`
+    )
+  },
+
+  /**
+   * 获取评估用例结果列表
+   */
+  listCaseResults: async (taskId: string, page = 1, pageSize = 20) => {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+    })
+    
+    return request<{
+      success: boolean
+      data: EvaluationCaseResult[]
+      total: number
+      page: number
+      page_size: number
+    }>(`/evaluation/tasks/${taskId}/results?${params}`)
+  },
+
+  /**
+   * 获取评估用例结果详情
+   */
+  getCaseResult: async (taskId: string, resultId: string) => {
+    return request<{ success: boolean; data: EvaluationCaseResult }>(
+      `/evaluation/tasks/${taskId}/results/${resultId}`
     )
   },
 }

@@ -12,6 +12,10 @@ import IndexWritingView from "@/components/views/index-writing"
 import RetrievalView from "@/components/views/retrieval"
 import GenerationTestView from "@/components/views/generation-test"
 import RetrieverEvaluationView from "@/components/views/retriever-evaluation"
+import TestSetManagementView from "@/components/views/test-set-management"
+import TestCaseManagementView from "@/components/views/test-case-management"
+import GeneratorEvaluationView from "@/components/views/generator-evaluation"
+import EvaluationHistoryView from "@/components/views/evaluation-history"
 import Dashboard from "@/components/views/dashboard"
 
 type ContentView =
@@ -25,7 +29,11 @@ type ContentView =
   | "pipeline-debug"
   | "retrieval"
   | "generation-test"
+  | "test-set-management"
+  | "test-case-management"
   | "retriever-evaluation"
+  | "generator-evaluation"
+  | "evaluation-history"
 
 export default function Home() {
   const [currentView, setCurrentView] = useState<ContentView>("dashboard")
@@ -73,8 +81,16 @@ export default function Home() {
         return <RetrievalView />
       case "generation-test":
         return <GenerationTestView />
+      case "test-set-management":
+        return <TestSetManagementView />
+      case "test-case-management":
+        return <TestCaseManagementView />
       case "retriever-evaluation":
         return <RetrieverEvaluationView />
+      case "generator-evaluation":
+        return <GeneratorEvaluationView />
+      case "evaluation-history":
+        return <EvaluationHistoryView />
       case "dashboard":
       default:
         return <Dashboard />

@@ -17,8 +17,12 @@ from app.schemas.test import (
     RunGenerationTestRequest,
     GenerationTestResultResponse,
 )
-from app.core.response import success_response, page_response
+from app.core.response import success_response, page_response, error_response
 from app.core.exceptions import NotFoundException, BadRequestException
+from app.services.test_service import TestService
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tests", tags=["测试管理"])
 
@@ -33,14 +37,46 @@ async def create_test_set(data: TestSetCreate):
     - **name**: 测试集名称
     - **kb_id**: 关联的知识库ID
     - **test_type**: 测试类型（retrieval/generation）
+    - **配置快照**: 可选，如果不提供则从知识库自动获取
     """
-    # TODO: 实现创建测试集逻辑
-    return JSONResponse(
-        content=success_response(
-            data={"id": "ts_temp_001"},
-            message="测试集创建成功（待实现）"
+    try:
+        # 验证知识库是否存在
+        from app.services.knowledge_base import KnowledgeBaseService
+        kb_service = KnowledgeBaseService()
+        kb = await kb_service.get_knowledge_base(data.kb_id)
+        if not kb:
+            return JSONResponse(
+                status_code=404,
+                content=error_response(
+                    message=f"知识库不存在: {data.kb_id}"
+                )
+            )
+        
+        # 创建测试集
+        test_service = TestService()
+        test_set = await test_service.create_test_set(data)
+        
+        # 转换为响应格式（先序列化为字典，datetime会自动转换为ISO字符串）
+        test_set_dict = test_set.model_dump()
+        response_data = TestSetResponse.model_validate(test_set_dict)
+        
+        return JSONResponse(
+            content=success_response(
+                data=response_data.model_dump(),
+                message="测试集创建成功"
+            )
         )
-    )
+    except NotFoundException as e:
+        return JSONResponse(
+            status_code=404,
+            content=error_response(message=str(e))
+        )
+    except Exception as e:
+        logger.error(f"创建测试集失败: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content=error_response(message=f"创建测试集失败: {str(e)}")
+        )
 
 
 @router.get("/test-sets", response_model=None, summary="获取测试集列表")
@@ -53,15 +89,47 @@ async def list_test_sets(
     """
     获取测试集列表
     """
-    # TODO: 实现获取测试集列表逻辑
-    return JSONResponse(
-        content=page_response(
-            data=[],
-            total=0,
+    try:
+        from app.models.test import TestType
+        
+        test_service = TestService()
+        test_type_enum = None
+        if test_type:
+            try:
+                test_type_enum = TestType(test_type)
+            except ValueError:
+                return JSONResponse(
+                    status_code=400,
+                    content=error_response(message=f"无效的测试类型: {test_type}")
+                )
+        
+        test_sets, total = await test_service.list_test_sets(
+            kb_id=kb_id,
+            test_type=test_type_enum,
             page=page,
-            page_size=page_size,
+            page_size=page_size
         )
-    )
+        
+        # 转换为响应格式（先序列化为字典，datetime会自动转换为ISO字符串）
+        response_data = []
+        for ts in test_sets:
+            ts_dict = ts.model_dump()
+            response_data.append(TestSetResponse.model_validate(ts_dict).model_dump())
+        
+        return JSONResponse(
+            content=page_response(
+                data=response_data,
+                total=total,
+                page=page,
+                page_size=page_size,
+            )
+        )
+    except Exception as e:
+        logger.error(f"获取测试集列表失败: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content=error_response(message=f"获取测试集列表失败: {str(e)}")
+        )
 
 
 @router.get("/test-sets/{test_set_id}", response_model=None, summary="获取测试集详情")
@@ -69,13 +137,32 @@ async def get_test_set(test_set_id: str):
     """
     根据ID获取测试集详情
     """
-    # TODO: 实现获取测试集详情逻辑
-    return JSONResponse(
-        content=success_response(
-            data=None,
-            message="测试集详情（待实现）"
+    try:
+        test_service = TestService()
+        test_set = await test_service.get_test_set(test_set_id)
+        
+        if not test_set:
+            return JSONResponse(
+                status_code=404,
+                content=error_response(message=f"测试集不存在: {test_set_id}")
+            )
+        
+        # 转换为响应格式（先序列化为字典，datetime会自动转换为ISO字符串）
+        test_set_dict = test_set.model_dump()
+        response_data = TestSetResponse.model_validate(test_set_dict)
+        
+        return JSONResponse(
+            content=success_response(
+                data=response_data.model_dump(),
+                message="获取测试集详情成功"
+            )
         )
-    )
+    except Exception as e:
+        logger.error(f"获取测试集详情失败: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content=error_response(message=f"获取测试集详情失败: {str(e)}")
+        )
 
 
 @router.put("/test-sets/{test_set_id}", response_model=None, summary="更新测试集")
@@ -83,12 +170,32 @@ async def update_test_set(test_set_id: str, data: TestSetUpdate):
     """
     更新测试集
     """
-    # TODO: 实现更新测试集逻辑
-    return JSONResponse(
-        content=success_response(
-            message="测试集更新成功（待实现）"
+    try:
+        test_service = TestService()
+        test_set = await test_service.update_test_set(test_set_id, data)
+        
+        if not test_set:
+            return JSONResponse(
+                status_code=404,
+                content=error_response(message=f"测试集不存在: {test_set_id}")
+            )
+        
+        # 转换为响应格式（先序列化为字典，datetime会自动转换为ISO字符串）
+        test_set_dict = test_set.model_dump()
+        response_data = TestSetResponse.model_validate(test_set_dict)
+        
+        return JSONResponse(
+            content=success_response(
+                data=response_data.model_dump(),
+                message="测试集更新成功"
+            )
         )
-    )
+    except Exception as e:
+        logger.error(f"更新测试集失败: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content=error_response(message=f"更新测试集失败: {str(e)}")
+        )
 
 
 @router.delete("/test-sets/{test_set_id}", response_model=None, summary="删除测试集")
@@ -98,12 +205,37 @@ async def delete_test_set(test_set_id: str):
     
     注意：会同时删除测试集下的所有测试用例
     """
-    # TODO: 实现删除测试集逻辑
-    return JSONResponse(
-        content=success_response(
-            message="测试集删除成功（待实现）"
+    try:
+        test_service = TestService()
+        
+        # 检查测试集是否存在
+        test_set = await test_service.get_test_set(test_set_id)
+        if not test_set:
+            return JSONResponse(
+                status_code=404,
+                content=error_response(message=f"测试集不存在: {test_set_id}")
+            )
+        
+        # 删除测试集（级联删除测试用例）
+        deleted = await test_service.delete_test_set(test_set_id)
+        
+        if not deleted:
+            return JSONResponse(
+                status_code=500,
+                content=error_response(message="删除测试集失败")
+            )
+        
+        return JSONResponse(
+            content=success_response(
+                message="测试集删除成功"
+            )
         )
-    )
+    except Exception as e:
+        logger.error(f"删除测试集失败: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content=error_response(message=f"删除测试集失败: {str(e)}")
+        )
 
 
 # ========== 测试用例管理 ==========
@@ -117,14 +249,33 @@ async def create_test_case(data: TestCaseCreate):
     - **query**: 测试问题
     - **expected_chunks**: 期望检索到的分块ID列表
     - **expected_answer**: 期望的答案
+    - **metadata**: 测试用例元数据（可选）
     """
-    # TODO: 实现创建测试用例逻辑
-    return JSONResponse(
-        content=success_response(
-            data={"id": "tc_temp_001"},
-            message="测试用例创建成功（待实现）"
+    try:
+        test_service = TestService()
+        test_case = await test_service.create_test_case(data)
+        
+        # 转换为响应格式（先序列化为字典，datetime会自动转换为ISO字符串）
+        test_case_dict = test_case.model_dump()
+        response_data = TestCaseResponse.model_validate(test_case_dict)
+        
+        return JSONResponse(
+            content=success_response(
+                data=response_data.model_dump(),
+                message="测试用例创建成功"
+            )
         )
-    )
+    except NotFoundException as e:
+        return JSONResponse(
+            status_code=404,
+            content=error_response(message=str(e))
+        )
+    except Exception as e:
+        logger.error(f"创建测试用例失败: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content=error_response(message=f"创建测试用例失败: {str(e)}")
+        )
 
 
 @router.get("/test-cases", response_model=None, summary="获取测试用例列表")
@@ -136,15 +287,34 @@ async def list_test_cases(
     """
     获取测试集的测试用例列表
     """
-    # TODO: 实现获取测试用例列表逻辑
-    return JSONResponse(
-        content=page_response(
-            data=[],
-            total=0,
+    try:
+        test_service = TestService()
+        test_cases, total = await test_service.list_test_cases(
+            test_set_id=test_set_id,
             page=page,
-            page_size=page_size,
+            page_size=page_size
         )
-    )
+        
+        # 转换为响应格式（先序列化为字典，datetime会自动转换为ISO字符串）
+        response_data = []
+        for tc in test_cases:
+            tc_dict = tc.model_dump()
+            response_data.append(TestCaseResponse.model_validate(tc_dict).model_dump())
+        
+        return JSONResponse(
+            content=page_response(
+                data=response_data,
+                total=total,
+                page=page,
+                page_size=page_size,
+            )
+        )
+    except Exception as e:
+        logger.error(f"获取测试用例列表失败: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content=error_response(message=f"获取测试用例列表失败: {str(e)}")
+        )
 
 
 @router.get("/test-cases/{test_case_id}", response_model=None, summary="获取测试用例详情")
@@ -152,13 +322,32 @@ async def get_test_case(test_case_id: str):
     """
     根据ID获取测试用例详情
     """
-    # TODO: 实现获取测试用例详情逻辑
-    return JSONResponse(
-        content=success_response(
-            data=None,
-            message="测试用例详情（待实现）"
+    try:
+        test_service = TestService()
+        test_case = await test_service.get_test_case(test_case_id)
+        
+        if not test_case:
+            return JSONResponse(
+                status_code=404,
+                content=error_response(message=f"测试用例不存在: {test_case_id}")
+            )
+        
+        # 转换为响应格式（先序列化为字典，datetime会自动转换为ISO字符串）
+        test_case_dict = test_case.model_dump()
+        response_data = TestCaseResponse.model_validate(test_case_dict)
+        
+        return JSONResponse(
+            content=success_response(
+                data=response_data.model_dump(),
+                message="获取测试用例详情成功"
+            )
         )
-    )
+    except Exception as e:
+        logger.error(f"获取测试用例详情失败: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content=error_response(message=f"获取测试用例详情失败: {str(e)}")
+        )
 
 
 @router.put("/test-cases/{test_case_id}", response_model=None, summary="更新测试用例")
@@ -166,12 +355,32 @@ async def update_test_case(test_case_id: str, data: TestCaseUpdate):
     """
     更新测试用例
     """
-    # TODO: 实现更新测试用例逻辑
-    return JSONResponse(
-        content=success_response(
-            message="测试用例更新成功（待实现）"
+    try:
+        test_service = TestService()
+        test_case = await test_service.update_test_case(test_case_id, data)
+        
+        if not test_case:
+            return JSONResponse(
+                status_code=404,
+                content=error_response(message=f"测试用例不存在: {test_case_id}")
+            )
+        
+        # 转换为响应格式（先序列化为字典，datetime会自动转换为ISO字符串）
+        test_case_dict = test_case.model_dump()
+        response_data = TestCaseResponse.model_validate(test_case_dict)
+        
+        return JSONResponse(
+            content=success_response(
+                data=response_data.model_dump(),
+                message="测试用例更新成功"
+            )
         )
-    )
+    except Exception as e:
+        logger.error(f"更新测试用例失败: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content=error_response(message=f"更新测试用例失败: {str(e)}")
+        )
 
 
 @router.delete("/test-cases/{test_case_id}", response_model=None, summary="删除测试用例")
@@ -179,12 +388,37 @@ async def delete_test_case(test_case_id: str):
     """
     删除测试用例
     """
-    # TODO: 实现删除测试用例逻辑
-    return JSONResponse(
-        content=success_response(
-            message="测试用例删除成功（待实现）"
+    try:
+        test_service = TestService()
+        
+        # 检查测试用例是否存在
+        test_case = await test_service.get_test_case(test_case_id)
+        if not test_case:
+            return JSONResponse(
+                status_code=404,
+                content=error_response(message=f"测试用例不存在: {test_case_id}")
+            )
+        
+        # 删除测试用例
+        deleted = await test_service.delete_test_case(test_case_id)
+        
+        if not deleted:
+            return JSONResponse(
+                status_code=500,
+                content=error_response(message="删除测试用例失败")
+            )
+        
+        return JSONResponse(
+            content=success_response(
+                message="测试用例删除成功"
+            )
         )
-    )
+    except Exception as e:
+        logger.error(f"删除测试用例失败: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content=error_response(message=f"删除测试用例失败: {str(e)}")
+        )
 
 
 # ========== 检索测试 ==========

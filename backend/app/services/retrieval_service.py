@@ -332,7 +332,7 @@ class RetrievalService:
         self,
         kb_id: str,
         query: str,
-        query_vector: List[float],
+        query_vector: Optional[List[float]] = None,
         query_sparse_vector: Optional[Dict[str, Any]] = None,
         top_k: int = 10,
         score_threshold: float = 0.0,
@@ -381,7 +381,29 @@ class RetrievalService:
             logger.error(f"创建Qdrant服务失败: {e}")
             return []
         
-        # 4. 如果没有提供稀疏向量，但知识库配置了稀疏向量字段，则尝试生成稀疏向量
+        # 4. 如果没有提供稠密向量，自动生成
+        if query_vector is None:
+            from app.services.embedding_service import EmbeddingServiceFactory
+            from app.models.knowledge_base import EmbeddingProvider
+            try:
+                # 转换provider字符串为枚举
+                if isinstance(kb.embedding_provider, str):
+                    provider = EmbeddingProvider(kb.embedding_provider)
+                else:
+                    provider = kb.embedding_provider
+                
+                # 创建嵌入服务实例
+                embedding_service = EmbeddingServiceFactory.create(
+                    provider=provider,
+                    model_name=kb.embedding_model
+                )
+                # 生成向量
+                query_vector = await embedding_service.embed_text(query)
+            except Exception as e:
+                logger.error(f"生成查询向量失败: {e}", exc_info=True)
+                return []
+        
+        # 5. 如果没有提供稀疏向量，但知识库配置了稀疏向量字段，则尝试生成稀疏向量
         if query_sparse_vector is None:
             # 生成BM25稀疏向量
             sparse_vector = await self.generate_sparse_vector(kb_id, query, method="bm25")
@@ -394,7 +416,7 @@ class RetrievalService:
                     "values": values
                 }
         
-        # 5. 执行Qdrant原生混合检索
+        # 6. 执行Qdrant原生混合检索
         try:
             search_results = await qdrant_service.hybrid_search(
                 collection_name=kb_id,
@@ -408,7 +430,7 @@ class RetrievalService:
             logger.error(f"Qdrant混合检索失败: {e}")
             return []
         
-        # 6. 构建结果对象
+        # 7. 构建结果对象
         results = []
         for rank, result in enumerate(search_results, start=1):
             payload = result.get("payload", {})
