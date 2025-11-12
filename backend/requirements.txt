@@ -23,7 +23,7 @@ pandas==2.1.4
 
 # Vector Databases (可选安装，根据需要选择)
 # elasticsearch==8.11.1
-# qdrant-client==1.7.0
+qdrant-client>=1.14.0
 # pymilvus==2.3.4
 
 # Text Splitter

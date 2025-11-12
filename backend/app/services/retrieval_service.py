@@ -376,7 +376,7 @@ class RetrievalService:
         
         # 3. 创建Qdrant服务实例
         try:
-            qdrant_service = QdrantService()
+            qdrant_service = QdrantService(config=kb.vector_db_config if kb.vector_db_config else None)
         except Exception as e:
             logger.error(f"创建Qdrant服务失败: {e}")
             return []
