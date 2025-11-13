@@ -42,7 +42,9 @@ const MENU_ITEMS: MenuItem[] = [
     label: "测试管理",
     children: [
       { id: "test-set-management", label: "测试集管理" },
-      { id: "test-case-management", label: "测试用例管理" },
+      { id: "retriever-test-case-management", label: "检索器用例" },
+      { id: "generation-test-case-management", label: "生成用例" },
+      { id: "test-case-management", label: "旧版用例管理" },
       { id: "retriever-evaluation", label: "检索器评估" },
       { id: "generator-evaluation", label: "生成器评估" },
       { id: "evaluation-history", label: "评估历史" },

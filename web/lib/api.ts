@@ -329,17 +329,6 @@ export interface TestSet {
   kb_id: string
   test_type: 'retrieval' | 'generation'
   case_count: number
-  created_at: string
-  updated_at: string
-}
-
-export interface TestSet {
-  id: string
-  name: string
-  description?: string
-  kb_id: string
-  test_type: 'retrieval' | 'generation'
-  case_count: number
   kb_config?: Record<string, any>
   chunking_config?: Record<string, any>
   embedding_config?: Record<string, any>
@@ -359,6 +348,92 @@ export interface TestCase {
   metadata?: Record<string, any>
   created_at: string
   updated_at: string
+}
+
+// ========== 新测试管理API类型定义 ==========
+
+/**
+ * 期望答案对象
+ */
+export interface ExpectedAnswer {
+  answer_text: string
+  chunk_id?: string
+  relevance_score: number
+}
+
+/**
+ * 检索器测试用例
+ */
+export interface RetrieverTestCase {
+  id: string
+  test_set_id: string
+  question: string
+  expected_answers: ExpectedAnswer[]
+  metadata?: Record<string, any>
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * 创建检索器测试用例
+ */
+export interface RetrieverTestCaseCreate {
+  test_set_id: string
+  question: string
+  expected_answers: ExpectedAnswer[]
+  metadata?: Record<string, any>
+}
+
+/**
+ * 更新检索器测试用例
+ */
+export interface RetrieverTestCaseUpdate {
+  question?: string
+  expected_answers?: ExpectedAnswer[]
+  metadata?: Record<string, any>
+}
+
+/**
+ * 参考答案对象
+ */
+export interface ReferenceAnswer {
+  answer_text: string
+  ground_truth?: string
+}
+
+/**
+ * 生成测试用例
+ */
+export interface GenerationTestCase {
+  id: string
+  test_set_id: string
+  question: string
+  reference_answer: ReferenceAnswer
+  contexts?: string[]
+  metadata?: Record<string, any>
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * 创建生成测试用例
+ */
+export interface GenerationTestCaseCreate {
+  test_set_id: string
+  question: string
+  reference_answer: ReferenceAnswer
+  contexts?: string[]
+  metadata?: Record<string, any>
+}
+
+/**
+ * 更新生成测试用例
+ */
+export interface GenerationTestCaseUpdate {
+  question?: string
+  reference_answer?: ReferenceAnswer
+  contexts?: string[]
+  metadata?: Record<string, any>
 }
 
 /**
@@ -1103,5 +1178,315 @@ export const debugAPI = {
       method: 'POST',
       body: JSON.stringify(data),
     })
+  },
+}
+
+// ========== 新测试管理API ==========
+
+/**
+ * 检索器测试用例API
+ */
+export const retrieverTestCaseAPI = {
+  /**
+   * 创建检索器测试用例
+   */
+  create: async (data: RetrieverTestCaseCreate) => {
+    return request<{ success: boolean; data: RetrieverTestCase; message: string }>(
+      '/tests/retriever/cases',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    )
+  },
+
+  /**
+   * 批量创建检索器测试用例
+   */
+  createBatch: async (cases: RetrieverTestCaseCreate[]) => {
+    return request<{ 
+      success: boolean
+      data: { 
+        created_count: number
+        failed_count: number
+        created_cases: RetrieverTestCase[]
+        errors: any[]
+      }
+      message: string 
+    }>(
+      '/tests/retriever/cases/batch',
+      {
+        method: 'POST',
+        body: JSON.stringify({ cases }),
+      }
+    )
+  },
+
+  /**
+   * 获取检索器测试用例列表
+   */
+  list: async (testSetId?: string, page = 1, pageSize = 20) => {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+    })
+    if (testSetId) {
+      params.append('test_set_id', testSetId)
+    }
+    
+    return request<{
+      success: boolean
+      data: RetrieverTestCase[]
+      total: number
+      page: number
+      page_size: number
+    }>(`/tests/retriever/cases?${params}`)
+  },
+
+  /**
+   * 获取检索器测试用例详情
+   */
+  get: async (caseId: string) => {
+    return request<{ success: boolean; data: RetrieverTestCase }>(
+      `/tests/retriever/cases/${caseId}`
+    )
+  },
+
+  /**
+   * 更新检索器测试用例
+   */
+  update: async (caseId: string, data: RetrieverTestCaseUpdate) => {
+    return request<{ success: boolean; data: RetrieverTestCase; message: string }>(
+      `/tests/retriever/cases/${caseId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }
+    )
+  },
+
+  /**
+   * 删除检索器测试用例
+   */
+  delete: async (caseId: string) => {
+    return request<{ success: boolean; message: string }>(
+      `/tests/retriever/cases/${caseId}`,
+      {
+        method: 'DELETE',
+      }
+    )
+  },
+
+  /**
+   * 批量删除检索器测试用例
+   */
+  deleteBatch: async (caseIds: string[]) => {
+    return request<{ 
+      success: boolean
+      data: {
+        deleted_count: number
+        failed_count: number
+        errors: any[]
+      }
+      message: string 
+    }>(
+      '/tests/retriever/cases/batch',
+      {
+        method: 'DELETE',
+        body: JSON.stringify({ case_ids: caseIds }),
+      }
+    )
+  },
+
+  /**
+   * 添加期望答案
+   */
+  addAnswer: async (caseId: string, answer: ExpectedAnswer) => {
+    return request<{ success: boolean; data: RetrieverTestCase; message: string }>(
+      `/tests/retriever/cases/${caseId}/answers`,
+      {
+        method: 'POST',
+        body: JSON.stringify(answer),
+      }
+    )
+  },
+
+  /**
+   * 更新期望答案
+   */
+  updateAnswer: async (caseId: string, answerIndex: number, answer: ExpectedAnswer) => {
+    return request<{ success: boolean; data: RetrieverTestCase; message: string }>(
+      `/tests/retriever/cases/${caseId}/answers/${answerIndex}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(answer),
+      }
+    )
+  },
+
+  /**
+   * 删除期望答案
+   */
+  deleteAnswer: async (caseId: string, answerIndex: number) => {
+    return request<{ success: boolean; data: RetrieverTestCase; message: string }>(
+      `/tests/retriever/cases/${caseId}/answers/${answerIndex}`,
+      {
+        method: 'DELETE',
+      }
+    )
+  },
+}
+
+/**
+ * 生成测试用例API
+ */
+export const generationTestCaseAPI = {
+  /**
+   * 创建生成测试用例
+   */
+  create: async (data: GenerationTestCaseCreate) => {
+    return request<{ success: boolean; data: GenerationTestCase; message: string }>(
+      '/tests/generation/cases',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    )
+  },
+
+  /**
+   * 批量创建生成测试用例
+   */
+  createBatch: async (cases: GenerationTestCaseCreate[]) => {
+    return request<{ 
+      success: boolean
+      data: { 
+        created_count: number
+        failed_count: number
+        created_cases: GenerationTestCase[]
+        errors: any[]
+      }
+      message: string 
+    }>(
+      '/tests/generation/cases/batch',
+      {
+        method: 'POST',
+        body: JSON.stringify({ cases }),
+      }
+    )
+  },
+
+  /**
+   * 获取生成测试用例列表
+   */
+  list: async (testSetId?: string, page = 1, pageSize = 20) => {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+    })
+    if (testSetId) {
+      params.append('test_set_id', testSetId)
+    }
+    
+    return request<{
+      success: boolean
+      data: GenerationTestCase[]
+      total: number
+      page: number
+      page_size: number
+    }>(`/tests/generation/cases?${params}`)
+  },
+
+  /**
+   * 获取生成测试用例详情
+   */
+  get: async (caseId: string) => {
+    return request<{ success: boolean; data: GenerationTestCase }>(
+      `/tests/generation/cases/${caseId}`
+    )
+  },
+
+  /**
+   * 更新生成测试用例
+   */
+  update: async (caseId: string, data: GenerationTestCaseUpdate) => {
+    return request<{ success: boolean; data: GenerationTestCase; message: string }>(
+      `/tests/generation/cases/${caseId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }
+    )
+  },
+
+  /**
+   * 删除生成测试用例
+   */
+  delete: async (caseId: string) => {
+    return request<{ success: boolean; message: string }>(
+      `/tests/generation/cases/${caseId}`,
+      {
+        method: 'DELETE',
+      }
+    )
+  },
+
+  /**
+   * 批量删除生成测试用例
+   */
+  deleteBatch: async (caseIds: string[]) => {
+    return request<{ 
+      success: boolean
+      data: {
+        deleted_count: number
+        failed_count: number
+        errors: any[]
+      }
+      message: string 
+    }>(
+      '/tests/generation/cases/batch',
+      {
+        method: 'DELETE',
+        body: JSON.stringify({ case_ids: caseIds }),
+      }
+    )
+  },
+
+  /**
+   * 添加上下文
+   */
+  addContext: async (caseId: string, context: string) => {
+    return request<{ success: boolean; data: GenerationTestCase; message: string }>(
+      `/tests/generation/cases/${caseId}/contexts`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ context }),
+      }
+    )
+  },
+
+  /**
+   * 更新上下文
+   */
+  updateContext: async (caseId: string, contextIndex: number, context: string) => {
+    return request<{ success: boolean; data: GenerationTestCase; message: string }>(
+      `/tests/generation/cases/${caseId}/contexts/${contextIndex}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ context }),
+      }
+    )
+  },
+
+  /**
+   * 删除上下文
+   */
+  deleteContext: async (caseId: string, contextIndex: number) => {
+    return request<{ success: boolean; data: GenerationTestCase; message: string }>(
+      `/tests/generation/cases/${caseId}/contexts/${contextIndex}`,
+      {
+        method: 'DELETE',
+      }
+    )
   },
 }

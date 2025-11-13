@@ -73,27 +73,45 @@ class RepositoryFactory:
     
     @staticmethod
     def create_test_case_repository():
-        """创建测试用例仓储"""
+        """创建测试用例仓储（已废弃，保留用于兼容性）"""
         from app.models.test import TestCase
         return RepositoryFactory.create(TestCase, "test_cases")
     
     @staticmethod
+    def create_retriever_test_case_repository():
+        """创建检索器测试用例仓储"""
+        from app.models.test import RetrieverTestCase
+        return RepositoryFactory.create(RetrieverTestCase, "retriever_test_cases")
+    
+    @staticmethod
+    def create_generation_test_case_repository():
+        """创建生成测试用例仓储"""
+        from app.models.test import GenerationTestCase
+        return RepositoryFactory.create(GenerationTestCase, "generation_test_cases")
+    
+    @staticmethod
     def create_retrieval_test_result_repository():
-        """创建检索测试结果仓储"""
+        """创建检索测试结果仓储（已废弃，保留用于兼容性）"""
         from app.models.test import RetrievalTestResult
         return RepositoryFactory.create(RetrievalTestResult, "retrieval_test_results")
     
     @staticmethod
     def create_generation_test_result_repository():
-        """创建生成测试结果仓储"""
+        """创建生成测试结果仓储（已废弃，保留用于兼容性）"""
         from app.models.test import GenerationTestResult
         return RepositoryFactory.create(GenerationTestResult, "generation_test_results")
     
     @staticmethod
-    def create_retriever_evaluation_repository():
+    def create_retriever_evaluation_result_repository():
         """创建检索器评估结果仓储"""
-        from app.models.retriever_evaluation import RetrieverEvaluationResult
-        return RepositoryFactory.create(RetrieverEvaluationResult, "retriever_evaluations")
+        from app.models.test import RetrieverEvaluationResult
+        return RepositoryFactory.create(RetrieverEvaluationResult, "retriever_evaluation_results")
+    
+    @staticmethod
+    def create_generation_evaluation_result_repository():
+        """创建生成评估结果仓储"""
+        from app.models.test import GenerationEvaluationResult
+        return RepositoryFactory.create(GenerationEvaluationResult, "generation_evaluation_results")
     
     @staticmethod
     def create_evaluation_task_repository():

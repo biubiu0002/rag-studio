@@ -92,6 +92,7 @@ async def health_check():
 
 # 导入并注册路由
 from app.controllers import knowledge_base, document, test_management, pipeline, retriever_evaluation, debug_pipeline, evaluation
+from app.controllers.new_test_management import retriever_router, generation_router
 
 app.include_router(knowledge_base.router, prefix=settings.API_PREFIX)
 app.include_router(document.router, prefix=settings.API_PREFIX)
@@ -100,6 +101,10 @@ app.include_router(pipeline.router, prefix=settings.API_PREFIX)
 app.include_router(retriever_evaluation.router, prefix=settings.API_PREFIX)
 app.include_router(debug_pipeline.router, prefix=settings.API_PREFIX)
 app.include_router(evaluation.router, prefix=settings.API_PREFIX)
+
+# 注册新的测试管理路由
+app.include_router(retriever_router, prefix=settings.API_PREFIX)
+app.include_router(generation_router, prefix=settings.API_PREFIX)
 
 
 # 注意：不要直接运行此文件
