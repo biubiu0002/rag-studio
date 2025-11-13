@@ -81,7 +81,7 @@ class TestSet(BaseModelMixin):
 
 
 class TestCase(BaseModelMixin):
-    """测试用例模型"""
+    """测试用例模型（已废弃，保留用于兼容性）"""
     
     test_set_id: str = Field(..., description="所属测试集ID")
     kb_id: str = Field(..., description="关联知识库ID")
@@ -112,8 +112,85 @@ class TestCase(BaseModelMixin):
         }
 
 
+class ExpectedAnswer(BaseModelMixin):
+    """期望答案模型（嵌套在RetrieverTestCase中）"""
+    
+    answer_text: str = Field(..., description="答案文本内容")
+    chunk_id: Optional[str] = Field(None, description="关联的分块ID")
+    relevance_score: float = Field(1.0, description="关联度分数（0.0-1.0）", ge=0.0, le=1.0)
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "answer_text": "在Python中使用class关键字定义类",
+                "chunk_id": "chunk_001",
+                "relevance_score": 1.0
+            }
+        }
+
+
+class RetrieverTestCase(BaseModelMixin):
+    """检索器测试用例模型"""
+    
+    test_set_id: str = Field(..., description="所属测试集ID")
+    question: str = Field(..., description="问题文本内容", min_length=1)
+    expected_answers: List[Dict[str, Any]] = Field(
+        ...,
+        description="期望答案列表",
+        min_items=1
+    )
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="用例元数据")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": "rtc_abc123",
+                "test_set_id": "ts_001",
+                "question": "Python中如何定义一个类？",
+                "expected_answers": [
+                    {
+                        "answer_text": "在Python中使用class关键字定义类",
+                        "chunk_id": "chunk_001",
+                        "relevance_score": 1.0
+                    },
+                    {
+                        "answer_text": "类是面向对象编程的基础",
+                        "chunk_id": "chunk_002",
+                        "relevance_score": 0.8
+                    }
+                ],
+                "metadata": {"source": "tutorial", "difficulty": "easy"}
+            }
+        }
+
+
+class GenerationTestCase(BaseModelMixin):
+    """生成测试用例模型"""
+    
+    test_set_id: str = Field(..., description="所属测试集ID")
+    question: str = Field(..., description="测试问题", min_length=1)
+    reference_answer: str = Field(..., description="参考答案（用于RAGAS评估）")
+    reference_contexts: List[str] = Field(
+        default_factory=list,
+        description="参考上下文列表（golden contexts）"
+    )
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="用例元数据")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": "gtc_xyz789",
+                "test_set_id": "ts_002",
+                "question": "如何定义Python类？",
+                "reference_answer": "在Python中使用class关键字...",
+                "reference_contexts": ["上下文1", "上下文2"],
+                "metadata": {"difficulty": "easy"}
+            }
+        }
+
+
 class RetrievalTestResult(BaseModelMixin):
-    """检索测试结果模型"""
+    """检索测试结果模型（已废弃，保留用于兼容性）"""
     
     test_case_id: str = Field(..., description="测试用例ID")
     test_set_id: str = Field(..., description="测试集ID")
@@ -161,8 +238,114 @@ class RetrievalTestResult(BaseModelMixin):
         }
 
 
+class RetrieverEvaluationResult(BaseModelMixin):
+    """检索器评估结果模型"""
+    
+    evaluation_task_id: str = Field(..., description="评估任务ID")
+    test_case_id: str = Field(..., description="测试用例ID（RetrieverTestCase）")
+    question: str = Field(..., description="问题文本（冗余存储便于查询）")
+    expected_answers: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="期望答案列表（结构同测试用例）"
+    )
+    retrieved_results: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="检索到的结果列表"
+    )
+    retrieval_time: float = Field(..., description="检索耗时（秒）")
+    
+    # 评估指标
+    precision: Optional[float] = Field(None, description="精确率", ge=0.0, le=1.0)
+    recall: Optional[float] = Field(None, description="召回率", ge=0.0, le=1.0)
+    f1_score: Optional[float] = Field(None, description="F1分数", ge=0.0, le=1.0)
+    mrr: Optional[float] = Field(None, description="平均倒数排名", ge=0.0, le=1.0)
+    map_score: Optional[float] = Field(None, description="平均精度均值", ge=0.0, le=1.0)
+    ndcg: Optional[float] = Field(None, description="归一化折损累积增益", ge=0.0, le=1.0)
+    hit_rate: Optional[float] = Field(None, description="命中率", ge=0.0, le=1.0)
+    
+    status: TestStatus = Field(default=TestStatus.COMPLETED, description="评估状态")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": "rer_001",
+                "evaluation_task_id": "et_001",
+                "test_case_id": "rtc_abc123",
+                "question": "Python中如何定义一个类？",
+                "expected_answers": [
+                    {"answer_text": "在Python中使用class关键字定义类", "chunk_id": "chunk_001", "relevance_score": 1.0}
+                ],
+                "retrieved_results": [
+                    {"chunk_id": "chunk_001", "chunk_text": "...", "score": 0.95, "rank": 1, "matched": True}
+                ],
+                "retrieval_time": 0.15,
+                "precision": 0.9,
+                "recall": 0.85,
+                "f1_score": 0.87
+            }
+        }
+
+
+class GenerationEvaluationResult(BaseModelMixin):
+    """生成评估结果模型"""
+    
+    evaluation_task_id: str = Field(..., description="评估任务ID")
+    test_case_id: str = Field(..., description="测试用例ID（GenerationTestCase）")
+    question: str = Field(..., description="问题（冗余存储便于查询）")
+    
+    # 检索上下文
+    retrieved_contexts: List[str] = Field(
+        default_factory=list,
+        description="检索到的上下文列表"
+    )
+    
+    # 生成结果
+    generated_answer: str = Field(..., description="生成的答案")
+    
+    # 时间统计
+    retrieval_time: float = Field(..., description="检索耗时（秒）")
+    generation_time: float = Field(..., description="生成耗时（秒）")
+    
+    # RAGAS评估指标
+    ragas_metrics: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="RAGAS评估指标集合（faithfulness, answer_relevancy, context_precision等）"
+    )
+    
+    # LLM配置
+    llm_model: Optional[str] = Field(None, description="使用的LLM模型")
+    
+    # 状态
+    status: TestStatus = Field(default=TestStatus.COMPLETED, description="评估状态")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": "ger_001",
+                "evaluation_task_id": "et_002",
+                "test_case_id": "gtc_xyz789",
+                "question": "如何定义Python类？",
+                "retrieved_contexts": ["上下文1", "上下文2"],
+                "generated_answer": "在Python中使用class关键字...",
+                "retrieval_time": 0.12,
+                "generation_time": 2.5,
+                "ragas_metrics": {
+                    "faithfulness": 0.85,
+                    "answer_relevancy": 0.80,
+                    "context_precision": 0.83,
+                    "context_recall": 0.78,
+                    "context_relevancy": 0.82,
+                    "answer_similarity": 0.88,
+                    "answer_correctness": 0.86
+                },
+                "llm_model": "qwen2:7b",
+                "status": "completed"
+            }
+        }
+
+
 class GenerationTestResult(BaseModelMixin):
-    """生成测试结果模型"""
+    """生成测试结果模型（已废弃，保留用于兼容性）"""
     
     test_case_id: str = Field(..., description="测试用例ID")
     test_set_id: str = Field(..., description="测试集ID")

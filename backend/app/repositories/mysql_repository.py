@@ -42,7 +42,9 @@ class MySQLRepository(BaseRepository[T], Generic[T]):
         # 动态导入ORM模型
         from app.database.models import (
             TestSetORM, TestCaseORM, EvaluationTaskORM,
-            EvaluationCaseResultORM, EvaluationSummaryORM
+            EvaluationCaseResultORM, EvaluationSummaryORM,
+            RetrieverTestCaseORM, GenerationTestCaseORM,
+            RetrieverEvaluationResultORM, GenerationEvaluationResultORM
         )
         
         model_map = {
@@ -51,6 +53,10 @@ class MySQLRepository(BaseRepository[T], Generic[T]):
             "evaluation_tasks": EvaluationTaskORM,
             "evaluation_case_results": EvaluationCaseResultORM,
             "evaluation_summaries": EvaluationSummaryORM,
+            "retriever_test_cases": RetrieverTestCaseORM,
+            "generation_test_cases": GenerationTestCaseORM,
+            "retriever_evaluation_results": RetrieverEvaluationResultORM,
+            "generation_evaluation_results": GenerationEvaluationResultORM,
         }
         
         if self.table_name not in model_map:

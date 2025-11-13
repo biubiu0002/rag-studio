@@ -43,7 +43,7 @@ class TestSetORM(Base):
 
 
 class TestCaseORM(Base):
-    """测试用例ORM模型"""
+    """测试用例ORM模型（已废弃，保留用于兼容性）"""
     __tablename__ = "test_cases"
     
     id = Column(String(50), primary_key=True)
@@ -56,6 +56,43 @@ class TestCaseORM(Base):
     
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class RetrieverTestCaseORM(Base):
+    """检索器测试用例ORM模型"""
+    __tablename__ = "retriever_test_cases"
+    
+    id = Column(String(50), primary_key=True)
+    test_set_id = Column(String(50), ForeignKey("test_sets.id", ondelete="CASCADE"), nullable=False, index=True)
+    question = Column(Text, nullable=False)
+    expected_answers = Column(JSON, nullable=False)  # Array of {answer_text, chunk_id, relevance_score}
+    metadata = Column(JSON, nullable=True)
+    
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        Index('idx_retriever_test_case_test_set', 'test_set_id'),
+    )
+
+
+class GenerationTestCaseORM(Base):
+    """生成测试用例ORM模型"""
+    __tablename__ = "generation_test_cases"
+    
+    id = Column(String(50), primary_key=True)
+    test_set_id = Column(String(50), ForeignKey("test_sets.id", ondelete="CASCADE"), nullable=False, index=True)
+    question = Column(Text, nullable=False)
+    reference_answer = Column(Text, nullable=False)
+    reference_contexts = Column(JSON, nullable=True)  # Array of strings
+    metadata = Column(JSON, nullable=True)
+    
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        Index('idx_generation_test_case_test_set', 'test_set_id'),
+    )
 
 
 class EvaluationTaskORM(Base):
@@ -84,7 +121,7 @@ class EvaluationTaskORM(Base):
 
 
 class EvaluationCaseResultORM(Base):
-    """评估用例结果ORM模型"""
+    """评估用例结果ORM模型（已废弃，保留用于兼容性）"""
     __tablename__ = "evaluation_case_results"
     
     id = Column(String(50), primary_key=True)
@@ -107,6 +144,65 @@ class EvaluationCaseResultORM(Base):
     error_message = Column(Text, nullable=True)
     
     created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+
+class RetrieverEvaluationResultORM(Base):
+    """检索器评估结果ORM模型"""
+    __tablename__ = "retriever_evaluation_results"
+    
+    id = Column(String(50), primary_key=True)
+    evaluation_task_id = Column(String(50), ForeignKey("evaluation_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    test_case_id = Column(String(50), ForeignKey("retriever_test_cases.id"), nullable=False, index=True)
+    question = Column(Text, nullable=False)
+    expected_answers = Column(JSON, nullable=False)  # Array of {answer_text, chunk_id, relevance_score}
+    retrieved_results = Column(JSON, nullable=False)  # Array of {chunk_id, chunk_text, score, rank, matched}
+    retrieval_time = Column(Float, nullable=False)
+    
+    # 评估指标
+    precision = Column(Float, nullable=True)
+    recall = Column(Float, nullable=True)
+    f1_score = Column(Float, nullable=True)
+    mrr = Column(Float, nullable=True)
+    map_score = Column(Float, nullable=True)
+    ndcg = Column(Float, nullable=True)
+    hit_rate = Column(Float, nullable=True)
+    
+    status = Column(SQLEnum(EvaluationStatusEnum), nullable=False, default=EvaluationStatusEnum.COMPLETED)
+    
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    
+    __table_args__ = (
+        Index('idx_retriever_eval_task', 'evaluation_task_id'),
+        Index('idx_retriever_eval_test_case', 'test_case_id'),
+    )
+
+
+class GenerationEvaluationResultORM(Base):
+    """生成评估结果ORM模型"""
+    __tablename__ = "generation_evaluation_results"
+    
+    id = Column(String(50), primary_key=True)
+    evaluation_task_id = Column(String(50), ForeignKey("evaluation_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    test_case_id = Column(String(50), ForeignKey("generation_test_cases.id"), nullable=False, index=True)
+    question = Column(Text, nullable=False)
+    
+    retrieved_contexts = Column(JSON, nullable=False)  # Array of strings
+    generated_answer = Column(Text, nullable=False)
+    
+    retrieval_time = Column(Float, nullable=False)
+    generation_time = Column(Float, nullable=False)
+    
+    ragas_metrics = Column(JSON, nullable=False)  # {faithfulness, answer_relevancy, ...}
+    llm_model = Column(String(100), nullable=True)
+    
+    status = Column(SQLEnum(EvaluationStatusEnum), nullable=False, default=EvaluationStatusEnum.COMPLETED)
+    
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    
+    __table_args__ = (
+        Index('idx_generation_eval_task', 'evaluation_task_id'),
+        Index('idx_generation_eval_test_case', 'test_case_id'),
+    )
 
 
 class EvaluationSummaryORM(Base):
