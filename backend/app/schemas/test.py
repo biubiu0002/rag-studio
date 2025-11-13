@@ -296,3 +296,257 @@ class DatasetStatisticsResponse(BaseModel):
                 "min_relevant_docs": 1
             }
         }
+
+
+# ========== 新的检索器测试用例API Schemas ==========
+
+class ExpectedAnswerCreate(BaseModel):
+    """期望答案创建Schema"""
+    
+    answer_text: str = Field(..., description="答案文本", min_length=1)
+    chunk_id: Optional[str] = Field(None, description="关联的文档分块ID")
+    relevance_score: float = Field(1.0, description="关联度分数（0.0-1.0）", ge=0.0, le=1.0)
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "answer_text": "Python使用class关键字定义类",
+                "chunk_id": "chunk_010",
+                "relevance_score": 1.0
+            }
+        }
+
+
+class RetrieverTestCaseCreate(BaseModel):
+    """创建检索器测试用例请求"""
+    
+    test_set_id: str = Field(..., description="所属测试集ID")
+    question: str = Field(..., description="问题文本内容", min_length=1)
+    expected_answers: List[ExpectedAnswerCreate] = Field(
+        ...,
+        description="期望答案列表",
+        min_items=1
+    )
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="用例元数据")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "test_set_id": "ts_001",
+                "question": "Python中如何定义一个类？",
+                "expected_answers": [
+                    {
+                        "answer_text": "Python使用class关键字定义类",
+                        "chunk_id": "chunk_010",
+                        "relevance_score": 1.0
+                    },
+                    {
+                        "answer_text": "类定义语法：class ClassName:",
+                        "chunk_id": "chunk_011",
+                        "relevance_score": 0.9
+                    }
+                ],
+                "metadata": {"difficulty": "easy"}
+            }
+        }
+
+
+class RetrieverTestCaseUpdate(BaseModel):
+    """更新检索器测试用例请求"""
+    
+    question: Optional[str] = Field(None, description="问题文本内容", min_length=1)
+    expected_answers: Optional[List[ExpectedAnswerCreate]] = Field(
+        None,
+        description="期望答案列表",
+        min_items=1
+    )
+    metadata: Optional[Dict[str, Any]] = Field(None, description="用例元数据")
+
+
+class RetrieverTestCaseResponse(BaseModel):
+    """检索器测试用例响应"""
+    
+    id: str
+    test_set_id: str
+    question: str
+    expected_answers: List[Dict[str, Any]]
+    metadata: Dict[str, Any]
+    created_at: str
+    updated_at: str
+    
+    class Config:
+        from_attributes = True
+
+
+class RetrieverTestCaseBatchCreate(BaseModel):
+    """批量创建检索器测试用例请求"""
+    
+    test_set_id: str = Field(..., description="所属测试集ID")
+    cases: List[Dict[str, Any]] = Field(
+        ...,
+        description="测试用例列表",
+        min_items=1
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "test_set_id": "ts_001",
+                "cases": [
+                    {
+                        "question": "Python中如何定义类？",
+                        "expected_answers": [
+                            {
+                                "answer_text": "使用class关键字",
+                                "chunk_id": "chunk_010",
+                                "relevance_score": 1.0
+                            }
+                        ],
+                        "metadata": {}
+                    }
+                ]
+            }
+        }
+
+
+class BatchDeleteRequest(BaseModel):
+    """批量删除请求"""
+    
+    case_ids: List[str] = Field(..., description="待删除的用例ID列表", min_items=1)
+
+
+class BatchOperationResponse(BaseModel):
+    """批量操作响应"""
+    
+    success_count: int = Field(..., description="成功数量")
+    failed_count: int = Field(..., description="失败数量")
+    failed_items: List[Dict[str, Any]] = Field(default_factory=list, description="失败记录")
+
+
+# ========== 生成测试用例API Schemas ==========
+
+class GenerationTestCaseCreate(BaseModel):
+    """创建生成测试用例请求"""
+    
+    test_set_id: str = Field(..., description="所属测试集ID")
+    question: str = Field(..., description="问题文本内容", min_length=1)
+    reference_answer: str = Field(..., description="参考答案", min_length=1)
+    reference_contexts: List[str] = Field(
+        default_factory=list,
+        description="参考上下文列表"
+    )
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="用例元数据")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "test_set_id": "ts_002",
+                "question": "什么是面向对象编程？",
+                "reference_answer": "面向对象编程是一种编程范式...",
+                "reference_contexts": [
+                    "面向对象编程的核心概念包括封装、继承和多态",
+                    "OOP是一种将数据和操作数据的方法组合在一起的编程方式"
+                ],
+                "metadata": {"difficulty": "medium"}
+            }
+        }
+
+
+class GenerationTestCaseUpdate(BaseModel):
+    """更新生成测试用例请求"""
+    
+    question: Optional[str] = Field(None, description="问题文本内容", min_length=1)
+    reference_answer: Optional[str] = Field(None, description="参考答案", min_length=1)
+    reference_contexts: Optional[List[str]] = Field(None, description="参考上下文列表")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="用例元数据")
+
+
+class GenerationTestCaseResponse(BaseModel):
+    """生成测试用例响应"""
+    
+    id: str
+    test_set_id: str
+    question: str
+    reference_answer: str
+    reference_contexts: List[str]
+    metadata: Dict[str, Any]
+    created_at: str
+    updated_at: str
+    
+    class Config:
+        from_attributes = True
+
+
+class GenerationTestCaseBatchCreate(BaseModel):
+    """批量创建生成测试用例请求"""
+    
+    test_set_id: str = Field(..., description="所属测试集ID")
+    cases: List[Dict[str, Any]] = Field(
+        ...,
+        description="测试用例列表",
+        min_items=1
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "test_set_id": "ts_002",
+                "cases": [
+                    {
+                        "question": "什么是面向对象编程？",
+                        "reference_answer": "面向对象编程是...",
+                        "reference_contexts": ["上下文1", "上下文2"],
+                        "metadata": {}
+                    }
+                ]
+            }
+        }
+
+
+# ========== 评估结果API Schemas ==========
+
+class RetrieverEvaluationResultDetailResponse(BaseModel):
+    """检索器评估结果详情响应"""
+    
+    id: str
+    evaluation_task_id: str
+    test_case_id: str
+    question: str
+    expected_answers: List[Dict[str, Any]]
+    retrieved_results: List[Dict[str, Any]]
+    retrieval_time: float
+    precision: Optional[float]
+    recall: Optional[float]
+    f1_score: Optional[float]
+    mrr: Optional[float]
+    map_score: Optional[float]
+    ndcg: Optional[float]
+    hit_rate: Optional[float]
+    status: TestStatus
+    created_at: str
+    
+    class Config:
+        from_attributes = True
+
+
+class GenerationEvaluationResultDetailResponse(BaseModel):
+    """生成评估结果详情响应"""
+    
+    id: str
+    evaluation_task_id: str
+    test_case_id: str
+    question: str
+    retrieved_contexts: List[str]
+    generated_answer: str
+    reference_answer: str
+    reference_contexts: List[str]
+    retrieval_time: float
+    generation_time: float
+    ragas_metrics: Dict[str, Any]
+    ragas_score: Optional[float]
+    llm_model: Optional[str]
+    status: TestStatus
+    created_at: str
+    
+    class Config:
+        from_attributes = True
