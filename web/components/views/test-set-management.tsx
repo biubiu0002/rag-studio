@@ -19,58 +19,53 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { testAPI, knowledgeBaseAPI, TestSet, KnowledgeBase } from "@/lib/api"
+import { testAPI, TestSet } from "@/lib/api"
 import { showToast } from "@/lib/toast"
+import { ArrowLeft, Plus, Edit, Trash2 } from "lucide-react"
+import RetrieverTestCaseManagementView from "./retriever-test-case-management"
+import GenerationTestCaseManagementView from "./generation-test-case-management"
+import TestSetImportHistoryView from "./test-set-import-history"
+
+type ViewMode = "list" | "detail"
+type DetailTab = "retriever-cases" | "generation-cases" | "import-history"
 
 export default function TestSetManagementView() {
   const [loading, setLoading] = useState(false)
   const [testSets, setTestSets] = useState<TestSet[]>([])
-  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([])
-  const [selectedKbId, setSelectedKbId] = useState<string>("")
   const [testType, setTestType] = useState<string>("")
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [pageSize] = useState(20)
   
+  // 视图状态
+  const [viewMode, setViewMode] = useState<ViewMode>("list")
+  const [selectedTestSet, setSelectedTestSet] = useState<TestSet | null>(null)
+  const [activeTab, setActiveTab] = useState<DetailTab>("retriever-cases")
+  
   // 对话框状态
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [selectedTestSet, setSelectedTestSet] = useState<TestSet | null>(null)
   
   // 表单数据
   const [formData, setFormData] = useState({
     name: "",
     description: "",
-    kb_id: "",
     test_type: "retrieval" as "retrieval" | "generation",
   })
 
-  // 加载知识库列表
-  useEffect(() => {
-    loadKnowledgeBases()
-  }, [])
-
   // 加载测试集列表
   useEffect(() => {
-    loadTestSets()
-  }, [selectedKbId, testType, page])
-
-  const loadKnowledgeBases = async () => {
-    try {
-      const result = await knowledgeBaseAPI.list(1, 100)
-      setKnowledgeBases(result.data)
-    } catch (error) {
-      console.error("加载知识库失败:", error)
-      showToast("加载知识库失败", "error")
+    if (viewMode === "list") {
+      loadTestSets()
     }
-  }
+  }, [testType, page, viewMode])
 
   const loadTestSets = async () => {
     try {
       setLoading(true)
       const result = await testAPI.listTestSets(
-        selectedKbId && selectedKbId !== "all" ? selectedKbId : undefined,
+        undefined, // 不再按知识库筛选
         testType && testType !== "all" ? testType : undefined,
         page,
         pageSize
@@ -86,17 +81,21 @@ export default function TestSetManagementView() {
   }
 
   const handleCreate = async () => {
-    if (!formData.name || !formData.kb_id) {
-      showToast("请填写必填字段", "error")
+    if (!formData.name) {
+      showToast("请填写测试集名称", "error")
       return
     }
 
     try {
       setLoading(true)
-      await testAPI.createTestSet(formData)
+      await testAPI.createTestSet({
+        name: formData.name,
+        description: formData.description,
+        test_type: formData.test_type,
+      })
       showToast("测试集创建成功", "success")
       setCreateDialogOpen(false)
-      setFormData({ name: "", description: "", kb_id: "", test_type: "retrieval" })
+      setFormData({ name: "", description: "", test_type: "retrieval" })
       loadTestSets()
     } catch (error) {
       console.error("创建测试集失败:", error)
@@ -108,7 +107,7 @@ export default function TestSetManagementView() {
 
   const handleEdit = async () => {
     if (!selectedTestSet || !formData.name) {
-      showToast("请填写必填字段", "error")
+      showToast("请填写测试集名称", "error")
       return
     }
 
@@ -142,7 +141,12 @@ export default function TestSetManagementView() {
       loadTestSets()
     } catch (error) {
       console.error("删除测试集失败:", error)
-      showToast("删除测试集失败: " + (error as Error).message, "error")
+      const errorMessage = (error as Error).message
+      if (errorMessage.includes("已导入到知识库")) {
+        showToast("删除失败: " + errorMessage, "error")
+      } else {
+        showToast("删除测试集失败: " + errorMessage, "error")
+      }
     } finally {
       setLoading(false)
     }
@@ -153,7 +157,6 @@ export default function TestSetManagementView() {
     setFormData({
       name: testSet.name,
       description: testSet.description || "",
-      kb_id: testSet.kb_id,
       test_type: testSet.test_type,
     })
     setEditDialogOpen(true)
@@ -164,11 +167,118 @@ export default function TestSetManagementView() {
     setDeleteDialogOpen(true)
   }
 
+  const handleTestSetClick = (testSet: TestSet) => {
+    setSelectedTestSet(testSet)
+    setViewMode("detail")
+    // 根据测试类型设置默认tab
+    if (testSet.test_type === "retrieval") {
+      setActiveTab("retriever-cases")
+    } else {
+      setActiveTab("generation-cases")
+    }
+  }
+
+  const handleBackToList = () => {
+    setViewMode("list")
+    setSelectedTestSet(null)
+    setActiveTab("retriever-cases")
+  }
+
+  // 详情视图
+  if (viewMode === "detail" && selectedTestSet) {
+    return (
+      <div className="flex h-full gap-6">
+        {/* 左侧Sidebar */}
+        <div className="w-48 border-r bg-white p-4">
+          <div className="mb-4">
+            <Button
+              variant="ghost"
+              onClick={handleBackToList}
+              className="w-full justify-start"
+            >
+              <ArrowLeft size={16} className="mr-2" />
+              返回列表
+            </Button>
+          </div>
+          <div className="space-y-2">
+            <h3 className="font-semibold text-gray-900 mb-2">管理项</h3>
+            {selectedTestSet.test_type === "retrieval" && (
+              <button
+                onClick={() => setActiveTab("retriever-cases")}
+                className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors border-l-2 ${
+                  activeTab === "retriever-cases"
+                    ? "bg-blue-50 text-blue-700 border-l-blue-600"
+                    : "text-gray-700 border-l-transparent hover:bg-gray-50"
+                }`}
+              >
+                检索器用例
+              </button>
+            )}
+            {selectedTestSet.test_type === "generation" && (
+              <button
+                onClick={() => setActiveTab("generation-cases")}
+                className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors border-l-2 ${
+                  activeTab === "generation-cases"
+                    ? "bg-blue-50 text-blue-700 border-l-blue-600"
+                    : "text-gray-700 border-l-transparent hover:bg-gray-50"
+                }`}
+              >
+                生成用例
+              </button>
+            )}
+            <button
+              onClick={() => setActiveTab("import-history")}
+              className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors border-l-2 ${
+                activeTab === "import-history"
+                  ? "bg-blue-50 text-blue-700 border-l-blue-600"
+                  : "text-gray-700 border-l-transparent hover:bg-gray-50"
+              }`}
+            >
+              导入历史
+            </button>
+          </div>
+        </div>
+
+        {/* 右侧内容区域 */}
+        <div className="flex-1 p-6 overflow-auto">
+          <div className="space-y-6">
+            {/* 测试集基本信息 */}
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900">{selectedTestSet.name}</h2>
+              {selectedTestSet.description && (
+                <p className="text-gray-600 mt-1">{selectedTestSet.description}</p>
+              )}
+              <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
+                <span className="px-2 py-1 rounded bg-blue-100 text-blue-700">
+                  {selectedTestSet.test_type === "retrieval" ? "检索测试" : "生成测试"}
+                </span>
+                <span>用例数量: {selectedTestSet.case_count}</span>
+                <span>创建时间: {new Date(selectedTestSet.created_at).toLocaleString()}</span>
+              </div>
+            </div>
+
+            {/* 根据选中的tab显示对应内容 */}
+            {activeTab === "retriever-cases" && selectedTestSet.test_type === "retrieval" && (
+              <RetrieverTestCaseManagementView testSetId={selectedTestSet.id} />
+            )}
+            {activeTab === "generation-cases" && selectedTestSet.test_type === "generation" && (
+              <GenerationTestCaseManagementView testSetId={selectedTestSet.id} />
+            )}
+            {activeTab === "import-history" && (
+              <TestSetImportHistoryView testSetId={selectedTestSet.id} />
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // 列表视图
   return (
     <div className="space-y-6">
       {/* 页面标题 */}
       <div>
-        <h2 className="text-2xl font-bold text-gray-900">测试集管理</h2>
+        <h2 className="text-2xl font-bold text-gray-900">测试集</h2>
         <p className="text-sm text-gray-500 mt-1">
           管理测试集，支持检索和生成两种类型的测试
         </p>
@@ -178,20 +288,6 @@ export default function TestSetManagementView() {
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center gap-4">
-            <Select value={selectedKbId || "all"} onValueChange={(value) => setSelectedKbId(value === "all" ? "" : value)}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="选择知识库" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部知识库</SelectItem>
-                {knowledgeBases.map((kb) => (
-                  <SelectItem key={kb.id} value={kb.id}>
-                    {kb.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
             <Select value={testType || "all"} onValueChange={(value) => setTestType(value === "all" ? "" : value)}>
               <SelectTrigger className="w-[150px]">
                 <SelectValue placeholder="测试类型" />
@@ -203,7 +299,10 @@ export default function TestSetManagementView() {
               </SelectContent>
             </Select>
 
-            <Button onClick={() => setCreateDialogOpen(true)}>创建测试集</Button>
+            <Button onClick={() => setCreateDialogOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              新建测试集
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -224,7 +323,8 @@ export default function TestSetManagementView() {
               {testSets.map((testSet) => (
                 <div
                   key={testSet.id}
-                  className="p-4 border rounded-lg hover:bg-gray-50 transition-colors"
+                  className="p-4 border rounded-lg hover:bg-gray-50 transition-colors cursor-pointer"
+                  onClick={() => handleTestSetClick(testSet)}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
@@ -238,25 +338,24 @@ export default function TestSetManagementView() {
                         <p className="text-sm text-gray-600 mt-1">{testSet.description}</p>
                       )}
                       <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
-                        <span>知识库: {testSet.kb_id}</span>
-                        <span>测试用例: {testSet.case_count}</span>
+                        <span>用例数量: {testSet.case_count}</span>
                         <span>创建时间: {new Date(testSet.created_at).toLocaleString()}</span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => openEditDialog(testSet)}
                       >
-                        编辑
+                        <Edit className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => openDeleteDialog(testSet)}
                       >
-                        删除
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
@@ -317,24 +416,6 @@ export default function TestSetManagementView() {
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 placeholder="测试集描述"
               />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">知识库 *</label>
-              <Select
-                value={formData.kb_id}
-                onValueChange={(value) => setFormData({ ...formData, kb_id: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="选择知识库" />
-                </SelectTrigger>
-                <SelectContent>
-                  {knowledgeBases.map((kb) => (
-                    <SelectItem key={kb.id} value={kb.id}>
-                      {kb.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">测试类型 *</label>
@@ -421,4 +502,3 @@ export default function TestSetManagementView() {
     </div>
   )
 }
-

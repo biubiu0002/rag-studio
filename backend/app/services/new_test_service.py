@@ -154,12 +154,13 @@ class RetrieverTestCaseService:
         update_data = data.model_dump(exclude_unset=True)
         
         # 特殊处理expected_answers
+        # model_dump()会将嵌套的Pydantic模型转换为字典，所以这里直接按字典访问
         if "expected_answers" in update_data and update_data["expected_answers"]:
             expected_answers = [
                 {
-                    "answer_text": ans.answer_text,
-                    "chunk_id": ans.chunk_id,
-                    "relevance_score": ans.relevance_score
+                    "answer_text": ans["answer_text"],
+                    "chunk_id": ans.get("chunk_id"),
+                    "relevance_score": ans.get("relevance_score", 1.0)
                 }
                 for ans in update_data["expected_answers"]
             ]

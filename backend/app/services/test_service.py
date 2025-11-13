@@ -33,52 +33,21 @@ class TestService:
     # ========== 测试集管理 ==========
     
     async def create_test_set(self, data: TestSetCreate) -> TestSet:
-        """创建测试集（支持配置快照）"""
+        """创建测试集（不再绑定知识库）"""
         test_set_id = f"ts_{uuid.uuid4().hex[:12]}"
         
-        # 如果未提供配置快照，尝试从知识库获取
+        # 创建测试集，不绑定知识库
         create_data = data.model_dump(exclude_none=True)
         
-        # 确保所有配置字段都是字典，不能是None
+        # 确保所有配置字段都是字典（保留兼容性，但不再使用）
         config_fields = ["kb_config", "chunking_config", "embedding_config", "sparse_vector_config", "index_config"]
         for field in config_fields:
             if field not in create_data or create_data[field] is None:
                 create_data[field] = {}
         
-        # 如果kb_config为空字典，尝试从知识库获取配置
-        if not create_data.get("kb_config") or create_data["kb_config"] == {}:
-            try:
-                from app.services.knowledge_base import KnowledgeBaseService
-                kb_service = KnowledgeBaseService()
-                kb = await kb_service.get_knowledge_base(data.kb_id)
-                if kb:
-                    # 构建配置快照
-                    create_data["kb_config"] = {
-                        "vector_db_type": kb.vector_db_type,
-                        "embedding_provider": kb.embedding_provider,
-                        "embedding_model": kb.embedding_model,
-                        "embedding_dimension": kb.embedding_dimension,
-                        "vector_db_config": kb.vector_db_config or {}
-                    }
-                    create_data["chunking_config"] = {
-                        "chunk_size": kb.chunk_size,
-                        "chunk_overlap": kb.chunk_overlap
-                    }
-                    create_data["embedding_config"] = {
-                        "provider": kb.embedding_provider,
-                        "model": kb.embedding_model,
-                        "dimension": kb.embedding_dimension
-                    }
-                    # 获取schema配置
-                    kb_schema = await kb_service.get_knowledge_base_schema(data.kb_id)
-                    if kb_schema:
-                        create_data["index_config"] = {
-                            "schema_fields": kb_schema.get("fields", []),
-                            "vector_db_type": kb.vector_db_type
-                        }
-            except Exception as e:
-                # 如果获取失败，使用空配置
-                logger.warning(f"获取知识库配置失败，使用空配置: {e}")
+        # kb_id不再必填，如果提供则保留（用于兼容），但不从知识库获取配置
+        if "kb_id" not in create_data:
+            create_data["kb_id"] = None
         
         test_set = TestSet(
             id=test_set_id,
@@ -126,7 +95,16 @@ class TestService:
         return test_set
     
     async def delete_test_set(self, test_set_id: str) -> bool:
-        """删除测试集（级联删除测试用例）"""
+        """删除测试集（检查是否有关联）"""
+        # 检查是否已导入到知识库
+        from app.models.test import TestSetKnowledgeBase
+        test_set_kb_repo = RepositoryFactory.create_test_set_knowledge_base_repository()
+        filters = {"test_set_id": test_set_id, "test_set_deleted": False}
+        associations = await test_set_kb_repo.get_all(skip=0, limit=1, filters=filters)
+        
+        if associations:
+            raise ValueError(f"测试集 {test_set_id} 已导入到知识库，无法删除。请先解除关联。")
+        
         # 先删除所有关联的测试用例
         try:
             test_cases, _ = await self.list_test_cases(test_set_id, page=1, page_size=10000)

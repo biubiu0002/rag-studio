@@ -326,7 +326,7 @@ export interface TestSet {
   id: string
   name: string
   description?: string
-  kb_id: string
+  kb_id?: string  // 改为可选
   test_type: 'retrieval' | 'generation'
   case_count: number
   kb_config?: Record<string, any>
@@ -446,7 +446,7 @@ export const testAPI = {
   createTestSet: async (data: {
     name: string
     description?: string
-    kb_id: string
+    kb_id?: string  // 改为可选
     test_type: 'retrieval' | 'generation'
     kb_config?: Record<string, any>
     chunking_config?: Record<string, any>
@@ -522,6 +522,132 @@ export const testAPI = {
         method: 'DELETE',
       }
     )
+  },
+
+  /**
+   * 预览导入结果
+   */
+  previewTestSetImport: async (testSetId: string, kbId: string) => {
+    return request<{
+      success: boolean
+      data: {
+        total_answers: number
+        new_docs: number
+        existing_docs: number
+        skipped_docs: number
+      }
+      message: string
+    }>(`/tests/test-sets/${testSetId}/import-preview?kb_id=${kbId}`)
+  },
+
+  /**
+   * 导入测试集到知识库
+   */
+  importTestSetToKnowledgeBase: async (testSetId: string, data: {
+    kb_id: string
+    update_existing?: boolean
+  }) => {
+    return request<{
+      success: boolean
+      data: {
+        id: string
+        test_set_id: string
+        kb_id: string
+        status: string
+        progress: number
+        total_docs: number
+        imported_docs: number
+        failed_docs: number
+        error_message?: string
+        started_at?: string
+        completed_at?: string
+        created_at: string
+      }
+      message: string
+    }>(`/tests/test-sets/${testSetId}/import-to-kb`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  /**
+   * 获取测试集导入历史
+   */
+  getTestSetImportHistory: async (testSetId: string, page = 1, pageSize = 20) => {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+    })
+    
+    return request<{
+      success: boolean
+      data: Array<{
+        id: string
+        test_set_id: string
+        kb_id: string
+        imported_at: string
+        import_config: Record<string, any>
+        kb_deleted: boolean
+        test_set_deleted: boolean
+        import_task?: {
+          id: string
+          status: string
+          progress: number
+          total_docs: number
+          imported_docs: number
+          failed_docs: number
+        }
+      }>
+      total: number
+      page: number
+      page_size: number
+    }>(`/tests/test-sets/${testSetId}/import-history?${params}`)
+  },
+
+  /**
+   * 获取导入任务详情
+   */
+  getImportTask: async (importTaskId: string) => {
+    return request<{
+      success: boolean
+      data: {
+        id: string
+        test_set_id: string
+        kb_id: string
+        status: string
+        progress: number
+        total_docs: number
+        imported_docs: number
+        failed_docs: number
+        error_message?: string
+        started_at?: string
+        completed_at?: string
+        created_at: string
+      }
+      message: string
+    }>(`/tests/import-tasks/${importTaskId}`)
+  },
+
+  /**
+   * 获取知识库已导入的测试集列表
+   */
+  getKnowledgeBaseTestSets: async (kbId: string, page = 1, pageSize = 20) => {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+    })
+    
+    return request<{
+      success: boolean
+      data: Array<{
+        test_set: TestSet
+        imported_at: string
+        import_config: Record<string, any>
+      }>
+      total: number
+      page: number
+      page_size: number
+    }>(`/tests/knowledge-bases/${kbId}/test-sets?${params}`)
   },
 
   /**
@@ -751,7 +877,7 @@ export interface EvaluationTask {
   kb_id: string
   evaluation_type: 'retrieval' | 'generation'
   task_name?: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'archived'
   retrieval_config?: Record<string, any>
   generation_config?: Record<string, any>
   total_cases: number
@@ -802,6 +928,7 @@ export const evaluationAPI = {
    */
   createTask: async (data: {
     test_set_id: string
+    kb_id: string
     evaluation_type: 'retrieval' | 'generation'
     task_name?: string
     retrieval_config?: Record<string, any>

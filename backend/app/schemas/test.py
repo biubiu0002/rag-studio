@@ -13,15 +13,15 @@ class TestSetCreate(BaseModel):
     
     name: str = Field(..., description="测试集名称", min_length=1, max_length=100)
     description: Optional[str] = Field(None, description="测试集描述", max_length=500)
-    kb_id: str = Field(..., description="关联知识库ID")
+    kb_id: Optional[str] = Field(None, description="关联知识库ID（已废弃，创建时不需要）")
     test_type: TestType = Field(..., description="测试类型")
     
-    # 配置快照（可选，如果不提供则从知识库获取）
-    kb_config: Optional[Dict[str, Any]] = Field(None, description="知识库配置快照")
-    chunking_config: Optional[Dict[str, Any]] = Field(None, description="分块策略配置")
-    embedding_config: Optional[Dict[str, Any]] = Field(None, description="嵌入模型参数配置")
-    sparse_vector_config: Optional[Dict[str, Any]] = Field(None, description="稀疏向量参数配置")
-    index_config: Optional[Dict[str, Any]] = Field(None, description="索引配置")
+    # 配置快照（已废弃，不再使用）
+    kb_config: Optional[Dict[str, Any]] = Field(None, description="知识库配置快照（已废弃）")
+    chunking_config: Optional[Dict[str, Any]] = Field(None, description="分块策略配置（已废弃）")
+    embedding_config: Optional[Dict[str, Any]] = Field(None, description="嵌入模型参数配置（已废弃）")
+    sparse_vector_config: Optional[Dict[str, Any]] = Field(None, description="稀疏向量参数配置（已废弃）")
+    index_config: Optional[Dict[str, Any]] = Field(None, description="索引配置（已废弃）")
     
     class Config:
         json_schema_extra = {
@@ -57,11 +57,70 @@ class TestSetResponse(BaseModel):
     id: str
     name: str
     description: Optional[str]
-    kb_id: str
+    kb_id: Optional[str]  # 改为可选
     test_type: TestType
     case_count: int
     created_at: str
     updated_at: str
+    
+    class Config:
+        from_attributes = True
+
+
+class ImportTestSetToKnowledgeBaseRequest(BaseModel):
+    """导入测试集到知识库请求"""
+    
+    kb_id: str = Field(..., description="目标知识库ID")
+    update_existing: bool = Field(True, description="是否更新已存在的文档")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "kb_id": "kb_001",
+                "update_existing": True
+            }
+        }
+
+
+class ImportPreviewResponse(BaseModel):
+    """导入预览响应"""
+    
+    total_answers: int = Field(..., description="总答案数")
+    new_docs: int = Field(..., description="将新增的文档数")
+    existing_docs: int = Field(..., description="已存在的文档数")
+    skipped_docs: int = Field(default=0, description="将跳过的文档数")
+
+
+class ImportTaskResponse(BaseModel):
+    """导入任务响应"""
+    
+    id: str
+    test_set_id: str
+    kb_id: str
+    status: str
+    progress: float
+    total_docs: int
+    imported_docs: int
+    failed_docs: int
+    error_message: Optional[str]
+    started_at: Optional[str]
+    completed_at: Optional[str]
+    created_at: str
+    
+    class Config:
+        from_attributes = True
+
+
+class TestSetKnowledgeBaseResponse(BaseModel):
+    """测试集-知识库关联响应"""
+    
+    id: str
+    test_set_id: str
+    kb_id: str
+    imported_at: str
+    import_config: Dict[str, Any]
+    kb_deleted: bool
+    test_set_deleted: bool
     
     class Config:
         from_attributes = True
@@ -305,7 +364,7 @@ class ExpectedAnswerCreate(BaseModel):
     
     answer_text: str = Field(..., description="答案文本", min_length=1)
     chunk_id: Optional[str] = Field(None, description="关联的文档分块ID")
-    relevance_score: float = Field(1.0, description="关联度分数（0.0-1.0）", ge=0.0, le=1.0)
+    relevance_score: float = Field(1.0, description="关联度分数（0.0-4.0）", ge=0.0, le=4.0)
     
     class Config:
         json_schema_extra = {

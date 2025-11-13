@@ -2,7 +2,7 @@
 SQLAlchemy ORM模型定义
 """
 
-from sqlalchemy import Column, String, Integer, Text, DateTime, Enum as SQLEnum, Float, JSON, ForeignKey, Index
+from sqlalchemy import Column, String, Integer, Text, DateTime, Enum as SQLEnum, Float, JSON, ForeignKey, Index, UniqueConstraint, Boolean
 from sqlalchemy.sql import func
 from app.database import Base
 import enum
@@ -18,6 +18,7 @@ class EvaluationStatusEnum(str, enum.Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    ARCHIVED = "archived"
 
 
 class TestSetORM(Base):
@@ -27,11 +28,11 @@ class TestSetORM(Base):
     id = Column(String(50), primary_key=True)
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
-    kb_id = Column(String(50), nullable=False, index=True)
+    kb_id = Column(String(50), nullable=True, index=True)  # 改为可空，用于兼容
     test_type = Column(SQLEnum(TestTypeEnum), nullable=False, index=True)
     case_count = Column(Integer, default=0)
     
-    # 配置快照（JSON字段）
+    # 配置快照（JSON字段）- 这些配置现在保存在TestSetKnowledgeBase中
     kb_config = Column(JSON, nullable=True)
     chunking_config = Column(JSON, nullable=True)
     embedding_config = Column(JSON, nullable=True)
@@ -40,6 +41,52 @@ class TestSetORM(Base):
     
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class TestSetKnowledgeBaseORM(Base):
+    """测试集-知识库关联表ORM模型"""
+    __tablename__ = "test_set_knowledge_bases"
+    
+    id = Column(String(50), primary_key=True)
+    test_set_id = Column(String(50), nullable=False, index=True)  # 不使用外键，允许软删除
+    kb_id = Column(String(50), nullable=False, index=True)  # 不使用外键，允许软删除
+    imported_at = Column(DateTime, nullable=False, server_default=func.now())
+    import_config = Column(JSON, nullable=True)  # 存储导入时的配置快照
+    
+    # 软删除标记
+    kb_deleted = Column(Boolean, default=False, nullable=False)
+    test_set_deleted = Column(Boolean, default=False, nullable=False)
+    
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    
+    # 唯一约束：同一测试集不能重复导入到同一知识库
+    __table_args__ = (
+        UniqueConstraint('test_set_id', 'kb_id', name='uq_test_set_kb'),
+        Index('idx_test_set_kb', 'test_set_id', 'kb_id'),
+    )
+
+
+class ImportTaskORM(Base):
+    """导入任务ORM模型"""
+    __tablename__ = "import_tasks"
+    
+    id = Column(String(50), primary_key=True)
+    test_set_id = Column(String(50), nullable=False, index=True)
+    kb_id = Column(String(50), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="pending")  # pending/running/completed/failed
+    progress = Column(Float, default=0.0)  # 0.0-1.0
+    total_docs = Column(Integer, default=0)
+    imported_docs = Column(Integer, default=0)
+    failed_docs = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+    import_config = Column(JSON, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    
+    __table_args__ = (
+        Index('idx_import_task_status', 'status'),
+    )
 
 
 class TestCaseORM(Base):

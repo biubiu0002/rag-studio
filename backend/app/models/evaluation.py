@@ -22,6 +22,7 @@ class EvaluationStatus(str, Enum):
     RUNNING = "running"        # 执行中
     COMPLETED = "completed"    # 已完成
     FAILED = "failed"          # 失败
+    ARCHIVED = "archived"      # 已归档
 
 
 class EvaluationTask(BaseModelMixin):

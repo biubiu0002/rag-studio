@@ -29,14 +29,16 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
-import { retrieverTestCaseAPI, testAPI, RetrieverTestCase, ExpectedAnswer, TestSet } from "@/lib/api"
+import { retrieverTestCaseAPI, RetrieverTestCase, ExpectedAnswer } from "@/lib/api"
 import { showToast } from "@/lib/toast"
 import { Plus, Edit, Trash2, X } from "lucide-react"
 
-export default function RetrieverTestCaseManagementView() {
+interface RetrieverTestCaseManagementViewProps {
+  testSetId: string
+}
+
+export default function RetrieverTestCaseManagementView({ testSetId }: RetrieverTestCaseManagementViewProps) {
   const [loading, setLoading] = useState(false)
-  const [testSets, setTestSets] = useState<TestSet[]>([])
-  const [selectedTestSetId, setSelectedTestSetId] = useState<string>("")
   const [testCases, setTestCases] = useState<RetrieverTestCase[]>([])
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
@@ -55,35 +57,17 @@ export default function RetrieverTestCaseManagementView() {
   ])
   const [metadata, setMetadata] = useState("")
 
-  // 加载测试集列表
-  useEffect(() => {
-    loadTestSets()
-  }, [])
-
   // 加载测试用例列表
   useEffect(() => {
-    if (selectedTestSetId) {
+    if (testSetId) {
       loadTestCases()
     }
-  }, [selectedTestSetId, page])
-
-  const loadTestSets = async () => {
-    try {
-      const result = await testAPI.listTestSets(undefined, "retrieval", 1, 100)
-      setTestSets(result.data)
-      if (result.data.length > 0 && !selectedTestSetId) {
-        setSelectedTestSetId(result.data[0].id)
-      }
-    } catch (error) {
-      console.error("加载测试集失败:", error)
-      showToast("加载测试集失败", "error")
-    }
-  }
+  }, [testSetId, page])
 
   const loadTestCases = async () => {
     try {
       setLoading(true)
-      const result = await retrieverTestCaseAPI.list(selectedTestSetId, page, pageSize)
+      const result = await retrieverTestCaseAPI.list(testSetId, page, pageSize)
       setTestCases(result.data)
       setTotal(result.total)
     } catch (error) {
@@ -117,7 +101,7 @@ export default function RetrieverTestCaseManagementView() {
       setLoading(true)
       const metadataObj = metadata.trim() ? JSON.parse(metadata) : {}
       await retrieverTestCaseAPI.create({
-        test_set_id: selectedTestSetId,
+        test_set_id: testSetId,
         question: question.trim(),
         expected_answers: validAnswers.map(a => ({
           answer_text: a.answer_text.trim(),
@@ -235,113 +219,94 @@ export default function RetrieverTestCaseManagementView() {
             添加答案
           </Button>
         </div>
-        {expectedAnswers.map((answer, index) => (
-          <div key={index} className="border rounded-lg p-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">答案 {index + 1}</span>
-              {expectedAnswers.length > 1 && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => removeExpectedAnswer(index)}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-            <div>
-              <Label className="text-xs">答案文本 *</Label>
-              <Textarea
-                value={answer.answer_text}
-                onChange={(e) => updateExpectedAnswer(index, "answer_text", e.target.value)}
-                placeholder="输入期望答案文本"
-                rows={2}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <Label className="text-xs">Chunk ID（可选）</Label>
-                <Input
-                  value={answer.chunk_id || ""}
-                  onChange={(e) => updateExpectedAnswer(index, "chunk_id", e.target.value)}
-                  placeholder="chunk-xxx"
-                />
-              </div>
-              <div>
-                <Label className="text-xs">关联度分数 (0-1)</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.1"
-                  value={answer.relevance_score}
-                  onChange={(e) => updateExpectedAnswer(index, "relevance_score", parseFloat(e.target.value))}
-                />
-              </div>
-            </div>
-          </div>
-        ))}
+        <div className="border rounded-lg overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[40%]">答案文本 *</TableHead>
+                <TableHead className="w-[25%]">Chunk ID</TableHead>
+                <TableHead className="w-[20%]">关联度分数</TableHead>
+                <TableHead className="w-[15%] text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {expectedAnswers.map((answer, index) => (
+                <TableRow key={index}>
+                  <TableCell>
+                    <Textarea
+                      value={answer.answer_text}
+                      onChange={(e) => updateExpectedAnswer(index, "answer_text", e.target.value)}
+                      placeholder="输入期望答案文本"
+                      rows={2}
+                      className="min-w-0"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      value={answer.chunk_id || ""}
+                      onChange={(e) => updateExpectedAnswer(index, "chunk_id", e.target.value)}
+                      placeholder="chunk-xxx"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Select
+                      value={answer.relevance_score.toString()}
+                      onValueChange={(value) => updateExpectedAnswer(index, "relevance_score", parseFloat(value))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="0">0</SelectItem>
+                        <SelectItem value="1">1</SelectItem>
+                        <SelectItem value="2">2</SelectItem>
+                        <SelectItem value="3">3</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {expectedAnswers.length > 1 && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => removeExpectedAnswer(index)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="h-full flex gap-6">
-      {/* 左侧侧边栏 */}
-      <div className="w-64 flex-shrink-0">
-        <Card className="h-full">
-          <CardHeader>
-            <CardTitle className="text-lg">测试集</CardTitle>
-            <CardDescription>选择一个检索器测试集</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {testSets.map((testSet) => (
-                <Button
-                  key={testSet.id}
-                  variant={selectedTestSetId === testSet.id ? "default" : "outline"}
-                  className="w-full justify-start"
-                  onClick={() => setSelectedTestSetId(testSet.id)}
-                >
-                  <div className="text-left truncate">
-                    <div className="font-medium">{testSet.name}</div>
-                    <div className="text-xs opacity-70">{testSet.case_count} 条用例</div>
-                  </div>
-                </Button>
-              ))}
-              {testSets.length === 0 && (
-                <p className="text-sm text-gray-500 text-center py-4">
-                  暂无测试集
-                </p>
-              )}
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>检索器测试用例</CardTitle>
+              <CardDescription>
+                管理问题及其期望答案
+              </CardDescription>
             </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* 右侧内容区域 */}
-      <div className="flex-1">
-        <Card className="h-full flex flex-col">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>检索器测试用例</CardTitle>
-                <CardDescription>
-                  管理问题及其期望答案
-                </CardDescription>
-              </div>
-              <Button onClick={() => {
-                resetForm()
-                setCreateDialogOpen(true)
-              }}>
-                <Plus className="h-4 w-4 mr-2" />
-                新建用例
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="flex-1 overflow-auto">
-            {selectedTestSetId ? (
+            <Button onClick={() => {
+              resetForm()
+              setCreateDialogOpen(true)
+            }}>
+              <Plus className="h-4 w-4 mr-2" />
+              新建用例
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="flex-1 overflow-auto">
+          {testSetId ? (
               <>
                 <Table>
                   <TableHeader>
@@ -355,7 +320,10 @@ export default function RetrieverTestCaseManagementView() {
                   <TableBody>
                     {testCases.map((testCase) => (
                       <TableRow key={testCase.id}>
-                        <TableCell className="font-medium">
+                        <TableCell 
+                          className="font-medium cursor-pointer hover:text-primary transition-colors"
+                          onClick={() => openEditDialog(testCase)}
+                        >
                           <div className="line-clamp-2">{testCase.question}</div>
                         </TableCell>
                         <TableCell>{testCase.expected_answers.length}</TableCell>
@@ -420,12 +388,11 @@ export default function RetrieverTestCaseManagementView() {
               </>
             ) : (
               <div className="text-center py-12 text-gray-500">
-                请先选择一个测试集
+                测试集ID无效
               </div>
             )}
-          </CardContent>
-        </Card>
-      </div>
+        </CardContent>
+      </Card>
 
       {/* 创建对话框 */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>

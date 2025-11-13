@@ -130,4 +130,16 @@ class RepositoryFactory:
         """创建评估汇总仓储"""
         from app.models.evaluation import EvaluationSummary
         return RepositoryFactory.create(EvaluationSummary, "evaluation_summaries")
+    
+    @staticmethod
+    def create_test_set_knowledge_base_repository():
+        """创建测试集-知识库关联仓储"""
+        from app.models.test import TestSetKnowledgeBase
+        return RepositoryFactory.create(TestSetKnowledgeBase, "test_set_knowledge_bases")
+    
+    @staticmethod
+    def create_import_task_repository():
+        """创建导入任务仓储"""
+        from app.models.test import ImportTask
+        return RepositoryFactory.create(ImportTask, "import_tasks")
 

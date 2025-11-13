@@ -22,14 +22,16 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Label } from "@/components/ui/label"
-import { generationTestCaseAPI, testAPI, GenerationTestCase, TestSet } from "@/lib/api"
+import { generationTestCaseAPI, GenerationTestCase } from "@/lib/api"
 import { showToast } from "@/lib/toast"
 import { Plus, Edit, Trash2, X } from "lucide-react"
 
-export default function GenerationTestCaseManagementView() {
+interface GenerationTestCaseManagementViewProps {
+  testSetId: string
+}
+
+export default function GenerationTestCaseManagementView({ testSetId }: GenerationTestCaseManagementViewProps) {
   const [loading, setLoading] = useState(false)
-  const [testSets, setTestSets] = useState<TestSet[]>([])
-  const [selectedTestSetId, setSelectedTestSetId] = useState<string>("")
   const [testCases, setTestCases] = useState<GenerationTestCase[]>([])
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
@@ -48,35 +50,17 @@ export default function GenerationTestCaseManagementView() {
   const [contexts, setContexts] = useState<string[]>([""])
   const [metadata, setMetadata] = useState("")
 
-  // 加载测试集列表
-  useEffect(() => {
-    loadTestSets()
-  }, [])
-
   // 加载测试用例列表
   useEffect(() => {
-    if (selectedTestSetId) {
+    if (testSetId) {
       loadTestCases()
     }
-  }, [selectedTestSetId, page])
-
-  const loadTestSets = async () => {
-    try {
-      const result = await testAPI.listTestSets(undefined, "generation", 1, 100)
-      setTestSets(result.data)
-      if (result.data.length > 0 && !selectedTestSetId) {
-        setSelectedTestSetId(result.data[0].id)
-      }
-    } catch (error) {
-      console.error("加载测试集失败:", error)
-      showToast("加载测试集失败", "error")
-    }
-  }
+  }, [testSetId, page])
 
   const loadTestCases = async () => {
     try {
       setLoading(true)
-      const result = await generationTestCaseAPI.list(selectedTestSetId, page, pageSize)
+      const result = await generationTestCaseAPI.list(testSetId, page, pageSize)
       setTestCases(result.data)
       setTotal(result.total)
     } catch (error) {
@@ -107,7 +91,7 @@ export default function GenerationTestCaseManagementView() {
       const validContexts = contexts.filter(c => c.trim())
       
       await generationTestCaseAPI.create({
-        test_set_id: selectedTestSetId,
+        test_set_id: testSetId,
         question: question.trim(),
         reference_answer: {
           answer_text: answerText.trim(),
@@ -247,61 +231,27 @@ export default function GenerationTestCaseManagementView() {
   }
 
   return (
-    <div className="h-full flex gap-6">
-      {/* 左侧侧边栏 */}
-      <div className="w-64 flex-shrink-0">
-        <Card className="h-full">
-          <CardHeader>
-            <CardTitle className="text-lg">测试集</CardTitle>
-            <CardDescription>选择一个生成测试集</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {testSets.map((testSet) => (
-                <Button
-                  key={testSet.id}
-                  variant={selectedTestSetId === testSet.id ? "default" : "outline"}
-                  className="w-full justify-start"
-                  onClick={() => setSelectedTestSetId(testSet.id)}
-                >
-                  <div className="text-left truncate">
-                    <div className="font-medium">{testSet.name}</div>
-                    <div className="text-xs opacity-70">{testSet.case_count} 条用例</div>
-                  </div>
-                </Button>
-              ))}
-              {testSets.length === 0 && (
-                <p className="text-sm text-gray-500 text-center py-4">
-                  暂无测试集
-                </p>
-              )}
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>生成测试用例（RAGAS）</CardTitle>
+              <CardDescription>
+                管理问题、参考答案和上下文，用于RAGAS评估
+              </CardDescription>
             </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* 右侧内容区域 */}
-      <div className="flex-1">
-        <Card className="h-full flex flex-col">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>生成测试用例（RAGAS）</CardTitle>
-                <CardDescription>
-                  管理问题、参考答案和上下文，用于RAGAS评估
-                </CardDescription>
-              </div>
-              <Button onClick={() => {
-                resetForm()
-                setCreateDialogOpen(true)
-              }}>
-                <Plus className="h-4 w-4 mr-2" />
-                新建用例
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="flex-1 overflow-auto">
-            {selectedTestSetId ? (
+            <Button onClick={() => {
+              resetForm()
+              setCreateDialogOpen(true)
+            }}>
+              <Plus className="h-4 w-4 mr-2" />
+              新建用例
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="flex-1 overflow-auto">
+          {testSetId ? (
               <>
                 <Table>
                   <TableHeader>
@@ -380,12 +330,11 @@ export default function GenerationTestCaseManagementView() {
               </>
             ) : (
               <div className="text-center py-12 text-gray-500">
-                请先选择一个测试集
+                测试集ID无效
               </div>
             )}
-          </CardContent>
-        </Card>
-      </div>
+        </CardContent>
+      </Card>
 
       {/* 创建对话框 */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>

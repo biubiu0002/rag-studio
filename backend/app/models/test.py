@@ -5,6 +5,7 @@
 from typing import Optional, List, Dict, Any
 from enum import Enum
 from pydantic import Field
+from datetime import datetime
 
 from app.models.base import BaseModelMixin
 
@@ -29,33 +30,63 @@ class TestSet(BaseModelMixin):
     name: str = Field(..., description="测试集名称", min_length=1, max_length=100)
     description: Optional[str] = Field(None, description="测试集描述", max_length=500)
     
-    kb_id: str = Field(..., description="关联知识库ID")
+    kb_id: Optional[str] = Field(None, description="关联知识库ID（已废弃，保留用于兼容）")
     test_type: TestType = Field(..., description="测试类型")
     
     # 统计信息
     case_count: int = Field(default=0, description="测试用例数量")
     
-    # 配置快照（索引写入前的完整配置）
+    # 配置快照（已废弃，现在保存在TestSetKnowledgeBase中）
     kb_config: Dict[str, Any] = Field(
         default_factory=dict,
-        description="知识库配置快照（包含vector_db_type, embedding_provider, embedding_model等）"
+        description="知识库配置快照（已废弃）"
     )
     chunking_config: Dict[str, Any] = Field(
         default_factory=dict,
-        description="分块策略配置（chunk_size, chunk_overlap, chunk_method等）"
+        description="分块策略配置（已废弃）"
     )
     embedding_config: Dict[str, Any] = Field(
         default_factory=dict,
-        description="嵌入模型参数配置（model, dimension, provider等）"
+        description="嵌入模型参数配置（已废弃）"
     )
     sparse_vector_config: Dict[str, Any] = Field(
         default_factory=dict,
-        description="稀疏向量参数配置（method: bm25/tf-idf/simple/splade, k1, b等）"
+        description="稀疏向量参数配置（已废弃）"
     )
     index_config: Dict[str, Any] = Field(
         default_factory=dict,
-        description="索引配置（schema_fields, vector_db_config等）"
+        description="索引配置（已废弃）"
     )
+
+
+class TestSetKnowledgeBase(BaseModelMixin):
+    """测试集-知识库关联模型"""
+    
+    test_set_id: str = Field(..., description="测试集ID")
+    kb_id: str = Field(..., description="知识库ID")
+    imported_at: datetime = Field(..., description="导入时间")
+    import_config: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="导入时的配置快照（知识库完整配置）"
+    )
+    kb_deleted: bool = Field(default=False, description="知识库是否已删除")
+    test_set_deleted: bool = Field(default=False, description="测试集是否已删除")
+
+
+class ImportTask(BaseModelMixin):
+    """导入任务模型"""
+    
+    test_set_id: str = Field(..., description="测试集ID")
+    kb_id: str = Field(..., description="知识库ID")
+    status: str = Field(default="pending", description="任务状态：pending/running/completed/failed")
+    progress: float = Field(default=0.0, description="进度（0.0-1.0）", ge=0.0, le=1.0)
+    total_docs: int = Field(default=0, description="总文档数")
+    imported_docs: int = Field(default=0, description="已导入文档数")
+    failed_docs: int = Field(default=0, description="失败文档数")
+    error_message: Optional[str] = Field(None, description="错误信息")
+    import_config: Dict[str, Any] = Field(default_factory=dict, description="导入配置")
+    started_at: Optional[datetime] = Field(None, description="开始时间")
+    completed_at: Optional[datetime] = Field(None, description="完成时间")
     
     class Config:
         json_schema_extra = {

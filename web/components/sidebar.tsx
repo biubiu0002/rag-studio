@@ -41,13 +41,8 @@ const MENU_ITEMS: MenuItem[] = [
     id: "test-management",
     label: "测试管理",
     children: [
-      { id: "test-set-management", label: "测试集管理" },
-      { id: "retriever-test-case-management", label: "检索器用例" },
-      { id: "generation-test-case-management", label: "生成用例" },
-      { id: "test-case-management", label: "旧版用例管理" },
-      { id: "retriever-evaluation", label: "检索器评估" },
-      { id: "generator-evaluation", label: "生成器评估" },
-      { id: "evaluation-history", label: "评估历史" },
+      { id: "test-set-management", label: "测试集" },
+      { id: "evaluation-tasks", label: "评估任务" },
     ],
   },
 ]
@@ -72,17 +67,7 @@ export default function Sidebar({ onNavigate, currentView }: SidebarProps) {
   }
 
   return (
-    <aside className="w-64 bg-white border-r border-gray-200 flex flex-col h-screen overflow-y-auto">
-      {/* Logo Section */}
-      <div className="p-6 border-b border-gray-200">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-            <span className="text-white font-bold text-sm">RAG</span>
-          </div>
-          <h1 className="text-lg font-bold text-gray-900">RAG Studio</h1>
-        </div>
-      </div>
-
+    <aside className="w-64 bg-white border-r border-gray-200 flex flex-col overflow-y-auto">
       {/* Menu Items */}
       <nav className="flex-1 px-3 py-4 space-y-1">
         {MENU_ITEMS.map((menuItem) => (

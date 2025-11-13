@@ -18,6 +18,7 @@ import RetrieverTestCaseManagementView from "@/components/views/retriever-test-c
 import GenerationTestCaseManagementView from "@/components/views/generation-test-case-management"
 import GeneratorEvaluationView from "@/components/views/generator-evaluation"
 import EvaluationHistoryView from "@/components/views/evaluation-history"
+import EvaluationTasksView from "@/components/views/evaluation-tasks"
 import Dashboard from "@/components/views/dashboard"
 
 type ContentView =
@@ -38,6 +39,7 @@ type ContentView =
   | "retriever-evaluation"
   | "generator-evaluation"
   | "evaluation-history"
+  | "evaluation-tasks"
 
 export default function Home() {
   const [currentView, setCurrentView] = useState<ContentView>("dashboard")
@@ -99,6 +101,8 @@ export default function Home() {
         return <GeneratorEvaluationView />
       case "evaluation-history":
         return <EvaluationHistoryView />
+      case "evaluation-tasks":
+        return <EvaluationTasksView />
       case "dashboard":
       default:
         return <Dashboard />
@@ -106,10 +110,25 @@ export default function Home() {
   }
 
   return (
-    <div className="flex h-screen bg-background">
-      <Sidebar onNavigate={handleNavigate} currentView={currentView} />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <Header breadcrumbs={breadcrumbs} />
+    <div className="flex flex-col h-screen bg-background">
+      {/* Top Header Row - Unified */}
+      <div className="flex border-b border-gray-200 shrink-0 items-stretch">
+        <div className="w-64 bg-white border-r border-gray-200 px-6 py-4 flex items-center min-h-[73px]">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
+              <span className="text-white font-bold text-sm">RAG</span>
+            </div>
+            <h1 className="text-lg font-bold text-gray-900">RAG Studio</h1>
+          </div>
+        </div>
+        <div className="flex-1">
+          <Header breadcrumbs={breadcrumbs} />
+        </div>
+      </div>
+      
+      {/* Main Content Area */}
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar onNavigate={handleNavigate} currentView={currentView} />
         <main className="flex-1 overflow-auto bg-background p-6">{renderContent()}</main>
       </div>
     </div>

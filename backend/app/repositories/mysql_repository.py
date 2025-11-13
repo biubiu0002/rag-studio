@@ -174,7 +174,8 @@ class MySQLRepository(BaseRepository[T], Generic[T]):
         self,
         skip: int = 0,
         limit: int = 100,
-        filters: Optional[Dict[str, Any]] = None
+        filters: Optional[Dict[str, Any]] = None,
+        order_by: Optional[str] = None
     ) -> List[T]:
         """获取所有实体（支持分页和过滤）"""
         def _get_all_sync():
@@ -190,6 +191,22 @@ class MySQLRepository(BaseRepository[T], Generic[T]):
                             conditions.append(getattr(self.orm_model, key) == value)
                     if conditions:
                         query = query.filter(and_(*conditions))
+                
+                # 应用排序
+                if order_by:
+                    if order_by.startswith('-'):
+                        # 倒序
+                        field_name = order_by[1:]
+                        if hasattr(self.orm_model, field_name):
+                            query = query.order_by(getattr(self.orm_model, field_name).desc())
+                    else:
+                        # 正序
+                        if hasattr(self.orm_model, order_by):
+                            query = query.order_by(getattr(self.orm_model, order_by))
+                else:
+                    # 默认按创建时间倒序
+                    if hasattr(self.orm_model, 'created_at'):
+                        query = query.order_by(self.orm_model.created_at.desc())
                 
                 # 分页
                 orm_objs = query.offset(skip).limit(limit).all()

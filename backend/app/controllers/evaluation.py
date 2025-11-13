@@ -24,6 +24,7 @@ router = APIRouter(prefix="/evaluation", tags=["评估管理"])
 class CreateEvaluationTaskRequest(BaseModel):
     """创建评估任务请求"""
     test_set_id: str = Field(..., description="测试集ID")
+    kb_id: str = Field(..., description="知识库ID")
     evaluation_type: str = Field(..., description="评估类型: retrieval, generation")
     task_name: Optional[str] = Field(None, description="任务名称")
     retrieval_config: Optional[Dict[str, Any]] = Field(None, description="检索配置")
@@ -55,6 +56,7 @@ async def create_evaluation_task(request: CreateEvaluationTaskRequest):
         
         task = await evaluation_service.create_evaluation_task(
             test_set_id=request.test_set_id,
+            kb_id=request.kb_id,
             evaluation_type=eval_type,
             retrieval_config=request.retrieval_config,
             generation_config=request.generation_config,

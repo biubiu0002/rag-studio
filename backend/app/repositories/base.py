@@ -48,7 +48,8 @@ class BaseRepository(ABC, Generic[T]):
         self,
         skip: int = 0,
         limit: int = 100,
-        filters: Optional[Dict[str, Any]] = None
+        filters: Optional[Dict[str, Any]] = None,
+        order_by: Optional[str] = None
     ) -> List[T]:
         """
         获取所有实体（支持分页和过滤）
@@ -57,6 +58,7 @@ class BaseRepository(ABC, Generic[T]):
             skip: 跳过数量
             limit: 限制数量
             filters: 过滤条件
+            order_by: 排序字段（格式：字段名 或 -字段名，-表示倒序）
         
         Returns:
             实体列表

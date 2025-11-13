@@ -13,7 +13,7 @@ from app.models.evaluation import (
     EvaluationTask, EvaluationCaseResult, EvaluationSummary,
     EvaluationType, EvaluationStatus
 )
-from app.models.test import TestSet, TestCase, TestType
+from app.models.test import TestSet, TestCase, TestType, RetrieverTestCase, GenerationTestCase
 from app.repositories.factory import RepositoryFactory
 from app.services.ragas_evaluation import RAGASEvaluationService
 from app.services.retrieval_service import RetrievalService
@@ -31,12 +31,14 @@ class EvaluationTaskService:
         self.case_result_repo = RepositoryFactory.create_evaluation_case_result_repository()
         self.summary_repo = RepositoryFactory.create_evaluation_summary_repository()
         self.test_set_repo = RepositoryFactory.create_test_set_repository()
-        self.test_case_repo = RepositoryFactory.create_test_case_repository()
+        self.retriever_case_repo = RepositoryFactory.create_retriever_test_case_repository()
+        self.generation_case_repo = RepositoryFactory.create_generation_test_case_repository()
         self.ragas_service = RAGASEvaluationService()
     
     async def create_evaluation_task(
         self,
         test_set_id: str,
+        kb_id: str,
         evaluation_type: EvaluationType,
         retrieval_config: Optional[Dict[str, Any]] = None,
         generation_config: Optional[Dict[str, Any]] = None,
@@ -47,6 +49,7 @@ class EvaluationTaskService:
         
         Args:
             test_set_id: 测试集ID
+            kb_id: 知识库ID
             evaluation_type: 评估类型
             retrieval_config: 检索配置
             generation_config: 生成配置
@@ -60,14 +63,32 @@ class EvaluationTaskService:
         if not test_set:
             raise NotFoundException(message=f"测试集不存在: {test_set_id}")
         
-        # 获取测试用例数量
-        filters = {"test_set_id": test_set_id}
-        test_cases = await self.test_case_repo.get_all(
-            skip=0,
-            limit=10000,  # 获取所有测试用例以统计数量
-            filters=filters
-        )
-        total = await self.test_case_repo.count(filters=filters)
+        # 验证知识库是否存在
+        from app.services.knowledge_base import KnowledgeBaseService
+        kb_service = KnowledgeBaseService()
+        kb = await kb_service.get_knowledge_base(kb_id)
+        if not kb:
+            raise NotFoundException(message=f"知识库不存在: {kb_id}")
+        
+        # 验证测试集是否已导入到知识库（可选，根据需求允许未导入的情况）
+        from app.models.test import TestSetKnowledgeBase
+        test_set_kb_repo = RepositoryFactory.create_test_set_knowledge_base_repository()
+        filters = {"test_set_id": test_set_id, "kb_id": kb_id, "kb_deleted": False, "test_set_deleted": False}
+        associations = await test_set_kb_repo.get_all(skip=0, limit=1, filters=filters)
+        
+        # 如果未导入，给出警告但不阻止创建（根据需求）
+        if not associations:
+            logger.warning(f"测试集 {test_set_id} 未导入到知识库 {kb_id}，但允许创建评估任务")
+        
+        # 获取测试用例数量（根据评估类型选择不同的仓库）
+        if evaluation_type == EvaluationType.RETRIEVAL:
+            retriever_case_repo = RepositoryFactory.create_retriever_test_case_repository()
+            filters = {"test_set_id": test_set_id}
+            total = await retriever_case_repo.count(filters=filters)
+        else:
+            generation_case_repo = RepositoryFactory.create_generation_test_case_repository()
+            filters = {"test_set_id": test_set_id}
+            total = await generation_case_repo.count(filters=filters)
         
         # 生成任务ID
         task_id = f"eval_task_{uuid.uuid4().hex[:12]}"
@@ -76,7 +97,7 @@ class EvaluationTaskService:
         task = EvaluationTask(
             id=task_id,
             test_set_id=test_set_id,
-            kb_id=test_set.kb_id,
+            kb_id=kb_id,
             evaluation_type=evaluation_type,
             task_name=task_name or f"{evaluation_type.value}_eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             status=EvaluationStatus.PENDING,
@@ -140,25 +161,33 @@ class EvaluationTaskService:
                 except Exception as e:
                     logger.warning(f"无法检查知识库集合: {e}")
             
-            filters = {"test_set_id": task.test_set_id}
-            test_cases = await self.test_case_repo.get_all(
-                skip=0,
-                limit=10000,
-                filters=filters
-            )
-            
-            if not test_cases:
-                raise ValueError(f"测试集 {task.test_set_id} 中没有测试用例")
-            
-            # 执行评估
+            # 根据评估类型获取对应的测试用例
             if task.evaluation_type == EvaluationType.RETRIEVAL:
+                filters = {"test_set_id": task.test_set_id}
+                test_cases = await self.retriever_case_repo.get_all(
+                    skip=0,
+                    limit=10000,
+                    filters=filters
+                )
+                if not test_cases:
+                    raise ValueError(f"测试集 {task.test_set_id} 中没有检索器测试用例")
                 await self._execute_retrieval_evaluation(
                     task, test_set, test_cases, save_detailed_results
                 )
             elif task.evaluation_type == EvaluationType.GENERATION:
+                filters = {"test_set_id": task.test_set_id}
+                test_cases = await self.generation_case_repo.get_all(
+                    skip=0,
+                    limit=10000,
+                    filters=filters
+                )
+                if not test_cases:
+                    raise ValueError(f"测试集 {task.test_set_id} 中没有生成器测试用例")
                 await self._execute_generation_evaluation(
                     task, test_set, test_cases, save_detailed_results
                 )
+            else:
+                raise ValueError(f"不支持的评估类型: {task.evaluation_type}")
             
             # 更新任务状态
             task.status = EvaluationStatus.COMPLETED
@@ -180,7 +209,7 @@ class EvaluationTaskService:
         self,
         task: EvaluationTask,
         test_set: TestSet,
-        test_cases: List[TestCase],
+        test_cases: List[RetrieverTestCase],
         save_detailed_results: bool
     ):
         """执行检索器评估"""
@@ -203,7 +232,7 @@ class EvaluationTaskService:
                 # 使用知识库的检索服务
                 results = await retrieval_service.qdrant_hybrid_search(
                     kb_id=task.kb_id,
-                    query=test_case.query,
+                    query=test_case.question,
                     query_vector=None,  # 自动生成
                     query_sparse_vector=None,  # 自动生成
                     top_k=top_k,
@@ -215,27 +244,53 @@ class EvaluationTaskService:
                 retrieved_chunks = [r.to_dict() for r in results]
                 retrieved_contexts_list = [r.content for r in results]
                 
-                # 获取期望的上下文（从期望的chunk_ids获取）
+                # 从expected_answers中提取期望的chunk_ids或external_ids
+                expected_chunk_ids = set()
+                expected_external_ids = set()
                 ground_truth_contexts_list = []
-                if test_case.expected_chunks:
-                    # 这里需要从向量库获取期望chunk的内容
-                    # 简化处理：使用expected_chunks作为标识
-                    ground_truth_contexts_list = test_case.expected_chunks
                 
-                queries.append(test_case.query)
+                for idx, answer in enumerate(test_case.expected_answers):
+                    if answer.get("chunk_id"):
+                        expected_chunk_ids.add(answer["chunk_id"])
+                    elif answer.get("answer_text"):
+                        # 如果没有chunk_id，通过external_id匹配
+                        # external_id格式: test_set_{test_set_id}_case_{case_id}_answer_{answer_index}
+                        external_id = f"test_set_{test_set.id}_case_{test_case.id}_answer_{idx}"
+                        expected_external_ids.add(external_id)
+                    if answer.get("answer_text"):
+                        ground_truth_contexts_list.append(answer["answer_text"])
+                
+                queries.append(test_case.question)
                 retrieved_contexts.append(retrieved_contexts_list)
                 ground_truth_contexts.append(ground_truth_contexts_list)
                 
                 # 计算评估指标
-                # 基础指标
-                expected_chunk_ids = set(test_case.expected_chunks or [])
-                retrieved_chunk_ids = [r.chunk_id for r in results]
-                
+                # 基础指标：优先使用chunk_id匹配，如果没有则使用external_id匹配
                 from app.services.retriever_evaluation import RetrieverEvaluator
                 evaluator = RetrieverEvaluator(top_k=top_k)
-                basic_metrics = evaluator.evaluate_single_query(
-                    retrieved_chunk_ids, list(expected_chunk_ids)
-                )
+                
+                if expected_chunk_ids:
+                    # 使用chunk_id匹配
+                    retrieved_chunk_ids = [r.chunk_id for r in results]
+                    basic_metrics = evaluator.evaluate_single_query(
+                        retrieved_chunk_ids, list(expected_chunk_ids)
+                    )
+                elif expected_external_ids:
+                    # 使用external_id匹配
+                    retrieved_external_ids = []
+                    for r in results:
+                        # 从metadata中提取external_id
+                        if r.metadata and isinstance(r.metadata, dict):
+                            external_id = r.metadata.get('external_id')
+                            if external_id:
+                                retrieved_external_ids.append(external_id)
+                    
+                    basic_metrics = evaluator.evaluate_single_query(
+                        retrieved_external_ids, list(expected_external_ids)
+                    )
+                else:
+                    # 既没有chunk_id也没有answer_text，无法评估
+                    basic_metrics = evaluator._empty_metrics()
                 
                 # 保存详细结果（先不包含RAGAS指标，后面批量评估后更新）
                 if save_detailed_results:
@@ -243,7 +298,7 @@ class EvaluationTaskService:
                         id=f"eval_result_{uuid.uuid4().hex[:12]}",
                         evaluation_task_id=task.id,
                         test_case_id=test_case.id,
-                        query=test_case.query,
+                        query=test_case.question,
                         retrieved_chunks=retrieved_chunks,
                         retrieval_time=0.0,  # TODO: 实际测量
                         retrieval_metrics=basic_metrics,
@@ -268,7 +323,7 @@ class EvaluationTaskService:
                         id=f"eval_result_{uuid.uuid4().hex[:12]}",
                         evaluation_task_id=task.id,
                         test_case_id=test_case.id,
-                        query=test_case.query,
+                        query=test_case.question,
                         status=EvaluationStatus.FAILED,
                         error_message=str(e)
                     )
@@ -340,7 +395,7 @@ class EvaluationTaskService:
         self,
         task: EvaluationTask,
         test_set: TestSet,
-        test_cases: List[TestCase],
+        test_cases: List[GenerationTestCase],
         save_detailed_results: bool
     ):
         """执行生成器评估"""
@@ -362,7 +417,7 @@ class EvaluationTaskService:
                 retrieval_config = generation_config.get("retrieval_config", {})
                 top_k = retrieval_config.get("top_k", 10)
                 retrieved_chunks = await rag_service.retrieve(
-                    query=test_case.query,
+                    query=test_case.question,
                     top_k=top_k
                 )
                 
@@ -379,7 +434,7 @@ class EvaluationTaskService:
 问题：{query}
 
 答案："""
-                prompt = prompt_template.format(context=context_str, query=test_case.query)
+                prompt = prompt_template.format(context=context_str, query=test_case.question)
                 
                 answer = await call_llm(
                     prompt=prompt,
@@ -391,18 +446,18 @@ class EvaluationTaskService:
                 )
                 
                 result = {
-                    "query": test_case.query,
+                    "query": test_case.question,
                     "answer": answer,
                     "contexts": retrieved_chunks,
                     "retrieval_time": 0.0,  # TODO: 实际测量
                     "generation_time": 0.0  # TODO: 实际测量
                 }
                 
-                queries.append(test_case.query)
+                queries.append(test_case.question)
                 answers.append(result.get("answer", ""))
                 contexts.append([chunk.get("content", "") for chunk in result.get("contexts", [])])
-                if test_case.expected_answer:
-                    ground_truth_answers.append(test_case.expected_answer)
+                if test_case.reference_answer:
+                    ground_truth_answers.append(test_case.reference_answer)
                 
                 # 保存详细结果
                 if save_detailed_results:
@@ -410,7 +465,7 @@ class EvaluationTaskService:
                         id=f"eval_result_{uuid.uuid4().hex[:12]}",
                         evaluation_task_id=task.id,
                         test_case_id=test_case.id,
-                        query=test_case.query,
+                        query=test_case.question,
                         retrieved_chunks=result.get("contexts", []),
                         generated_answer=result.get("answer", ""),
                         retrieval_time=result.get("retrieval_time", 0.0),
@@ -432,7 +487,7 @@ class EvaluationTaskService:
                         id=f"eval_result_{uuid.uuid4().hex[:12]}",
                         evaluation_task_id=task.id,
                         test_case_id=test_case.id,
-                        query=test_case.query,
+                        query=test_case.question,
                         status=EvaluationStatus.FAILED,
                         error_message=str(e)
                     )
@@ -573,7 +628,8 @@ class EvaluationTaskService:
             filters["status"] = status
         
         skip = (page - 1) * page_size
-        tasks = await self.task_repo.get_all(skip=skip, limit=page_size, filters=filters)
+        # 按创建时间倒序排序（最新的在最上方）
+        tasks = await self.task_repo.get_all(skip=skip, limit=page_size, filters=filters, order_by="-created_at")
         total = await self.task_repo.count(filters=filters)
         
         return tasks, total

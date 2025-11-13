@@ -100,7 +100,8 @@ class JsonRepository(BaseRepository[T], Generic[T]):
         self,
         skip: int = 0,
         limit: int = 100,
-        filters: Optional[Dict[str, Any]] = None
+        filters: Optional[Dict[str, Any]] = None,
+        order_by: Optional[str] = None
     ) -> List[T]:
         """获取所有实体"""
         data = self._load_data()
@@ -108,6 +109,38 @@ class JsonRepository(BaseRepository[T], Generic[T]):
         # 应用过滤器
         if filters:
             data = [item for item in data if self._match_filters(item, filters)]
+        
+        # 应用排序
+        if order_by:
+            reverse = False
+            field_name = order_by
+            if order_by.startswith('-'):
+                reverse = True
+                field_name = order_by[1:]
+            
+            # 分离None和非None值
+            items_with_none = []
+            items_with_value = []
+            
+            for item in data:
+                value = item.get(field_name)
+                if value is None:
+                    items_with_none.append(item)
+                else:
+                    items_with_value.append(item)
+            
+            # 对非None值排序
+            items_with_value.sort(key=lambda x: x.get(field_name), reverse=reverse)
+            
+            # 合并：倒序时None在前，正序时None在后
+            if reverse:
+                data = items_with_none + items_with_value
+            else:
+                data = items_with_value + items_with_none
+        else:
+            # 默认按创建时间倒序
+            if 'created_at' in (data[0] if data else {}):
+                data = sorted(data, key=lambda x: x.get('created_at') or '', reverse=True)
         
         # 应用分页
         data = data[skip:skip + limit]
