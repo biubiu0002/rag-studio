@@ -218,37 +218,152 @@ class RetrievalService:
         self,
         kb_id: str,
         query: str,
-        query_tokens: Optional[List[str]] = None,
+        query_sparse_vector: Optional[Dict[str, Any]] = None,
         top_k: int = 10,
         score_threshold: float = 0.0
     ) -> List[RetrievalResult]:
         """
-        关键词检索（基于BM25算法）
+        关键词检索（基于稀疏向量）
+        
+        对于Qdrant等支持稀疏向量的数据库，直接使用稀疏向量检索；
+        对于不支持的数据库，回退到BM25算法。
         
         Args:
             kb_id: 知识库ID
             query: 查询文本
-            query_tokens: 查询分词结果
+            query_sparse_vector: 稀疏查询向量 (indices和values的字典)
             top_k: 返回数量
             score_threshold: 分数阈值
             
         Returns:
             检索结果列表
         """
-        # 1. 如果没有提供查询分词，自动生成
-        if query_tokens is None:
-            try:
-                from app.services.tokenizer_service import get_tokenizer_service
-                tokenizer = get_tokenizer_service()
-                query_tokens = tokenizer.tokenize(query, mode="search")
-            except Exception as e:
-                logger.error(f"查询分词失败: {e}")
-                query_tokens = []
-        
-        # 2. 获取知识库信息
+        # 1. 获取知识库信息
         kb = await self.kb_service.get_knowledge_base(kb_id)
         if not kb:
             logger.warning(f"知识库不存在: {kb_id}")
+            return []
+        
+        # 2. 如果没有提供稀疏向量，生成稀疏向量
+        if query_sparse_vector is None:
+            sparse_method = kb.vector_db_config.get("sparse_method", "bm25") if kb.vector_db_config else "bm25"
+            sparse_service = SparseVectorServiceFactory.create(sparse_method)
+            query_sparse_dict = sparse_service.generate_query_sparse_vector(query)
+            converted_sparse = sparse_service.convert_to_qdrant_format(query_sparse_dict)
+            # 确保是字典类型
+            if isinstance(converted_sparse, list):
+                query_sparse_vector = converted_sparse[0] if len(converted_sparse) > 0 else {"indices": [], "values": []}
+            else:
+                query_sparse_vector = converted_sparse
+        
+        # 3. 根据向量数据库类型选择检索方式
+        if kb.vector_db_type == VectorDBType.QDRANT:
+            # 对于Qdrant，使用稀疏向量检索
+            return await self._qdrant_sparse_search(
+                kb_id=kb_id,
+                query_sparse_vector=query_sparse_vector,
+                top_k=top_k,
+                score_threshold=score_threshold
+            )
+        else:
+            # 对于其他数据库，暂未实现
+            pass
+            # from app.services.tokenizer_service import get_tokenizer_service
+            # tokenizer = get_tokenizer_service()
+            # query_tokens = tokenizer.tokenize(query)
+            # return await self._bm25_search(
+            #     kb_id=kb_id,
+            #     query_tokens=query_tokens,
+            #     top_k=top_k,
+            #     score_threshold=score_threshold
+            # )
+    
+    async def _qdrant_sparse_search(
+        self,
+        kb_id: str,
+        query_sparse_vector: Dict[str, Any],
+        top_k: int = 10,
+        score_threshold: float = 0.0
+    ) -> List[RetrievalResult]:
+        """
+        Qdrant稀疏向量检索（内部方法）
+        
+        使用Qdrant的query_points API，只查询稀疏向量字段
+        """
+        # 1. 获取知识库信息
+        kb = await self.kb_service.get_knowledge_base(kb_id)
+        if not kb:
+            return []
+        
+        # 2. 创建Qdrant服务实例
+        try:
+            qdrant_service = QdrantService(config=kb.vector_db_config if kb.vector_db_config else None)
+        except Exception as e:
+            logger.error(f"创建Qdrant服务失败: {e}")
+            return []
+        
+        # 3. 获取稀疏向量字段名称
+        try:
+            from qdrant_client.http.models import SparseVector
+            
+            collection_info = qdrant_service.client.get_collection(kb_id)
+            sparse_vector_name = "sparse_vector"  # 默认名称
+            
+            if hasattr(collection_info.config.params, 'sparse_vectors'):
+                sparse_vectors_config = collection_info.config.params.sparse_vectors
+                if isinstance(sparse_vectors_config, dict) and len(sparse_vectors_config) > 0:
+                    sparse_vector_name = next(iter(sparse_vectors_config.keys()))
+            
+            # 构建稀疏向量查询
+            sparse_vector = SparseVector(
+                indices=query_sparse_vector["indices"],
+                values=query_sparse_vector["values"]
+            )
+            
+            # 执行稀疏向量检索
+            search_result = qdrant_service.client.query_points(
+                collection_name=kb_id,
+                query=sparse_vector,
+                using=sparse_vector_name,
+                limit=top_k,
+                score_threshold=score_threshold if score_threshold > 0 else None
+            )
+            
+            # 构建结果对象
+            results = []
+            for rank, scored_point in enumerate(search_result.points, start=1):
+                payload = scored_point.payload
+                if payload is not None:
+                    results.append(RetrievalResult(
+                        doc_id=payload.get("doc_id", ""),
+                        chunk_id=payload.get("chunk_id", str(scored_point.id)),
+                        content=payload.get("content", ""),
+                        score=scored_point.score,
+                        rank=rank,
+                        source="keyword",
+                        metadata=payload
+                    ))
+            
+            logger.info(f"Qdrant稀疏向量检索完成: {len(results)} 个结果")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Qdrant稀疏向量检索失败: {e}", exc_info=True)
+            return []
+    
+    async def _bm25_search(
+        self,
+        kb_id: str,
+        query_tokens: List[str],
+        top_k: int = 10,
+        score_threshold: float = 0.0
+    ) -> List[RetrievalResult]:
+        """
+        BM25检索（内部方法，用于不支持稀疏向量的数据库）
+        """
+        # 1. 获取知识库信息
+        kb = await self.kb_service.get_knowledge_base(kb_id)
+        if not kb:
             return []
         
         # 2. 获取文档服务
@@ -335,10 +450,10 @@ class RetrievalService:
                 )
                 results.append(retrieval_result)
         
-        logger.info(f"关键词检索完成: {len(results)} 个结果")
+        logger.info(f"BM25检索完成: {len(results)} 个结果")
         return results
     
-    async def qdrant_hybrid_search(
+    async def hybrid_search(
         self,
         kb_id: str,
         query: str,
@@ -346,10 +461,17 @@ class RetrievalService:
         query_sparse_vector: Optional[Dict[str, Any]] = None,
         top_k: int = 10,
         score_threshold: float = 0.0,
-        fusion: str = "rrf"
+        fusion: str = "rrf",
+        semantic_weight: float =0.7,
+        keyword_weight: float = 0.3,
+        rrf_k: int = 10
     ) -> List[RetrievalResult]:
         """
-        Qdrant原生混合检索（稠密向量+稀疏向量）
+        混合检索（稠密向量+稀疏向量）
+        
+        根据向量数据库类型自动选择最优检索策略：
+        - Qdrant: 使用原生混合检索（Prefetch + Fusion）
+        - 其他: 使用RRF融合多路检索结果
         
         Args:
             kb_id: 知识库ID
@@ -359,6 +481,9 @@ class RetrievalService:
             top_k: 返回数量
             score_threshold: 分数阈值
             fusion: 融合方法 ("rrf" 或 "dbsf")
+            semantic_weight: 浓密向量权重
+            keyword_weight: 关键词权重
+            rrf_k: RRF融合参数
             
         Returns:
             检索结果列表
@@ -369,20 +494,48 @@ class RetrievalService:
             logger.warning(f"知识库不存在: {kb_id}")
             return []
         
-        # 2. 检查是否为Qdrant数据库
-        if kb.vector_db_type != VectorDBType.QDRANT:
-            logger.warning(f"Qdrant混合检索仅支持Qdrant数据库，当前数据库类型: {kb.vector_db_type}")
-            # 回退到普通混合检索
-            return await self.hybrid_search(
+        # 2. 根据数据库类型选择混合检索策略
+        if kb.vector_db_type == VectorDBType.QDRANT:
+            # 使用Qdrant原生混合检索
+            return await self._qdrant_hybrid_search(
                 kb_id=kb_id,
                 query=query,
                 query_vector=query_vector,
-                query_tokens=[],  # 需要分词结果
+                query_sparse_vector=query_sparse_vector,
                 top_k=top_k,
-                vector_weight=0.7,
-                keyword_weight=0.3,
-                rrf_k=60
+                score_threshold=score_threshold,
+                fusion=fusion,
+                semantic_weight=semantic_weight,
+                keyword_weight=keyword_weight,
+                rrf_k=rrf_k
             )
+        else:
+            # 使用RRF融合多路检索 暂未实现
+            return []
+    
+    async def _qdrant_hybrid_search(
+        self,
+        kb_id: str,
+        query: str,
+        query_vector: Optional[List[float]] = None,
+        query_sparse_vector: Optional[Dict[str, Any]] = None,
+        top_k: int = 10,
+        score_threshold: float = 0.0,
+        fusion: str = "rrf",
+        semantic_weight: float =0.7,
+        keyword_weight: float = 0.3,
+        rrf_k: int = 10
+    ) -> List[RetrievalResult]:
+        """
+        Qdrant原生混合检索（内部方法）
+        
+        使用Qdrant的Prefetch + Fusion机制实现混合检索
+        """
+        # 1. 获取知识库信息
+        kb = await self.kb_service.get_knowledge_base(kb_id)
+        if not kb:
+            logger.warning(f"知识库不存在: {kb_id}")
+            return []
         
         # 3. 创建Qdrant服务实例
         try:
@@ -416,15 +569,13 @@ class RetrievalService:
         # 5. 如果没有提供稀疏向量，但知识库配置了稀疏向量字段，则尝试生成稀疏向量
         if query_sparse_vector is None:
             # 生成BM25稀疏向量
-            sparse_vector = await self.generate_sparse_vector(kb_id, query, method="bm25")
-            if sparse_vector:
-                # 将稀疏向量转换为Qdrant格式
-                from app.services.sparse_vector_service import convert_sparse_vector_to_qdrant_format
-                indices, values = convert_sparse_vector_to_qdrant_format(sparse_vector)
-                query_sparse_vector = {
-                    "indices": indices,
-                    "values": values
-                }
+            from app.services.sparse_vector_service import SparseVectorServiceFactory
+            # todo service_type从kb配置来 目前仅支持bm25
+            service_type = "bm25"
+            sparse_service = SparseVectorServiceFactory.create(service_type="bm25")
+            
+            sparse_vector = sparse_service.generate_query_sparse_vector(query=query)
+            query_sparse_vector = sparse_service.convert_to_qdrant_format(sparse_vector) # pyright: ignore[reportAssignmentType]
         
         # 6. 执行Qdrant原生混合检索
         try:
@@ -434,7 +585,10 @@ class RetrievalService:
                 query_sparse_vector=query_sparse_vector,
                 top_k=top_k,
                 score_threshold=score_threshold,
-                fusion=fusion
+                fusion=fusion,
+                semantic_weight=semantic_weight,
+                keyword_weight=keyword_weight,
+                rrf_k=rrf_k
             )
         except Exception as e:
             logger.error(f"Qdrant混合检索失败: {e}")
@@ -462,359 +616,9 @@ class RetrievalService:
             )
             results.append(retrieval_result)
         
-        logger.info(f"Qdrant混合检索完成: {len(results)} 个结果")
+        logger.info(f"Qdrant原生混合检索完成: {len(results)} 个结果")
         return results
     
-    async def hybrid_search(
-        self,
-        kb_id: str,
-        query: str,
-        query_vector: Optional[List[float]] = None,
-        query_tokens: Optional[List[str]] = None,
-        top_k: int = 10,
-        score_threshold: float = 0.0,
-        vector_weight: float = 0.7,
-        keyword_weight: float = 0.3,
-        rrf_k: int = 60,
-        fusion: str = "rrf"
-    ) -> List[RetrievalResult]:
-        """
-        混合检索（向量 + 关键词 + RRF融合）
-        
-        Args:
-            kb_id: 知识库ID
-            query: 查询文本
-            query_vector: 查询向量
-            query_tokens: 查询分词
-            top_k: 返回数量
-            vector_weight: 向量检索权重
-            keyword_weight: 关键词检索权重
-            rrf_k: RRF参数k
-            
-        Returns:
-            融合后的检索结果
-        """
-        # 1. 获取知识库信息
-        kb = await self.kb_service.get_knowledge_base(kb_id)
-        if not kb:
-            logger.warning(f"知识库不存在: {kb_id}")
-            return []
-        
-        # 2. 根据向量数据库类型选择合适的混合检索策略
-        if kb.vector_db_type == VectorDBType.QDRANT:
-            # 对于Qdrant，可以使用原生混合检索（如果提供了稀疏向量）
-            # 这里可以检查知识库schema是否配置了稀疏向量字段
-            # 暂时先使用RRF融合的方式，后续可以扩展为原生混合检索
-            pass
-        
-        # 3. 执行向量检索
-        vector_results = await self.vector_search(
-            kb_id=kb_id,
-            query=query,
-            query_vector=query_vector,
-            top_k=top_k * 2  # 获取更多结果用于融合
-        )
-        
-        # 4. 生成稀疏向量用于混合检索
-        query_sparse_vector = None
-        if kb.vector_db_type == VectorDBType.QDRANT:
-            # 生成BM25稀疏向量
-            sparse_vector = await self.generate_sparse_vector(kb_id, query, method="bm25")
-            if sparse_vector:
-                # 将稀疏向量转换为Qdrant格式
-                from app.services.sparse_vector_service import convert_sparse_vector_to_qdrant_format
-                indices, values = convert_sparse_vector_to_qdrant_format(sparse_vector)
-                query_sparse_vector = {
-                    "indices": indices,
-                    "values": values
-                }
-        
-        # 5. 执行关键词检索
-        keyword_results = await self.keyword_search(
-            kb_id=kb_id,
-            query=query,
-            query_tokens=query_tokens,
-            top_k=top_k * 2
-        )
-        
-        # 6. 应用融合方法
-        if not vector_results and not keyword_results:
-            return []
-        
-        if fusion == "weighted":
-            # 使用加权平均融合
-            return self._weighted_fusion(
-                vector_results=vector_results,
-                keyword_results=keyword_results,
-                top_k=top_k,
-                vector_weight=vector_weight,
-                keyword_weight=keyword_weight
-            )
-        else:
-            # 使用RRF融合（默认）
-            if not vector_results:
-                return keyword_results[:top_k]
-            if not keyword_results:
-                return vector_results[:top_k]
-            
-            fused_results = RRFFusion.fusion(
-                results_lists=[vector_results, keyword_results],
-                k=rrf_k,
-                weights=[vector_weight, keyword_weight]
-            )
-            
-            return fused_results[:top_k]
-    
-    def _weighted_fusion(
-        self,
-        vector_results: List[RetrievalResult],
-        keyword_results: List[RetrievalResult],
-        top_k: int,
-        vector_weight: float = 0.7,
-        keyword_weight: float = 0.3
-    ) -> List[RetrievalResult]:
-        """
-        加权平均融合
-        
-        Args:
-            vector_results: 向量检索结果
-            keyword_results: 关键词检索结果
-            top_k: 返回数量
-            vector_weight: 向量检索权重
-            keyword_weight: 关键词检索权重
-            
-        Returns:
-            融合后的检索结果
-        """
-        # 基于 chunk_id 合并结果
-        doc_scores = {}
-        doc_info = {}
-        
-        # 处理向量检索结果
-        for result in vector_results:
-            chunk_id = result.chunk_id
-            # 对原始分数进行一次化(不同重量下的最大分数可能不同)
-            normalized_score = min(result.score, 1.0)  # 确保分数不超出1
-            doc_scores[chunk_id] = vector_weight * normalized_score
-            doc_info[chunk_id] = result
-        
-        # 处理关键词检索结果并合并分数
-        for result in keyword_results:
-            chunk_id = result.chunk_id
-            normalized_score = min(result.score, 1.0)
-            if chunk_id in doc_scores:
-                # 已有向量分数，添加关键词分数
-                doc_scores[chunk_id] += keyword_weight * normalized_score
-            else:
-                # 只有关键词分数
-                doc_scores[chunk_id] = keyword_weight * normalized_score
-                doc_info[chunk_id] = result
-        
-        # 按有权分数排序
-        sorted_docs = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
-        
-        # 构建最终结果
-        final_results = []
-        for rank, (chunk_id, score) in enumerate(sorted_docs[:top_k], start=1):
-            result = doc_info[chunk_id]
-            fused_result = RetrievalResult(
-                doc_id=result.doc_id,
-                chunk_id=result.chunk_id,
-                content=result.content,
-                score=score,
-                rank=rank,
-                source="hybrid",
-                metadata={
-                    **result.metadata,
-                    "fusion_method": "weighted_average",
-                    "vector_weight": vector_weight,
-                    "keyword_weight": keyword_weight
-                }
-            )
-            final_results.append(fused_result)
-        
-        logger.info(f"加权平均融合完成: {len(final_results)} 个结果")
-        return final_results
-    
-    async def advanced_hybrid_search(
-        self,
-        kb_id: str,
-        query: str,
-        query_vector: List[float],
-        query_sparse_vector: Optional[Dict[str, Any]] = None,
-        query_tokens: Optional[List[str]] = None,
-        top_k: int = 10,
-        vector_weight: float = 0.5,
-        sparse_weight: float = 0.3,
-        keyword_weight: float = 0.2,
-        rrf_k: int = 60,
-        fusion_method: str = "rrf"
-    ) -> List[RetrievalResult]:
-        """
-        高级混合检索（支持多种检索方式的组合）
-        
-        Args:
-            kb_id: 知识库ID
-            query: 查询文本
-            query_vector: 稠密查询向量
-            query_sparse_vector: 稀疏查询向量
-            query_tokens: 查询分词结果
-            top_k: 返回数量
-            vector_weight: 稠密向量检索权重
-            sparse_weight: 稀疏向量检索权重
-            keyword_weight: 关键词检索权重
-            rrf_k: RRF参数k
-            fusion_method: 融合方法 ("rrf" 或 "dbsf")
-            
-        Returns:
-            融合后的检索结果
-        """
-        # 1. 获取知识库信息
-        kb = await self.kb_service.get_knowledge_base(kb_id)
-        if not kb:
-            logger.warning(f"知识库不存在: {kb_id}")
-            return []
-        
-        results_lists = []
-        weights = []
-        
-        # 2. 如果没有提供稀疏向量，尝试生成稀疏向量
-        if query_sparse_vector is None:
-            # 生成BM25稀疏向量
-            sparse_vector = await self.generate_sparse_vector(kb_id, query, method="bm25")
-            if sparse_vector:
-                # 将稀疏向量转换为Qdrant格式
-                from app.services.sparse_vector_service import convert_sparse_vector_to_qdrant_format
-                indices, values = convert_sparse_vector_to_qdrant_format(sparse_vector)
-                query_sparse_vector = {
-                    "indices": indices,
-                    "values": values
-                }
-        
-        # 3. 根据向量数据库类型和提供的数据选择检索方式
-        if kb.vector_db_type == VectorDBType.QDRANT and query_sparse_vector is not None:
-            # 使用Qdrant原生混合检索
-            qdrant_results = await self.qdrant_hybrid_search(
-                kb_id=kb_id,
-                query=query,
-                query_vector=query_vector,
-                query_sparse_vector=query_sparse_vector,
-                top_k=top_k * 2,
-                fusion=fusion_method
-            )
-            if qdrant_results:
-                results_lists.append(qdrant_results)
-                # 对于原生混合检索，我们给它较高的权重
-                weights.append(vector_weight + sparse_weight)
-        else:
-            # 分别执行不同类型的检索
-            if vector_weight > 0:
-                # 稠密向量检索
-                vector_results = await self.vector_search(
-                    kb_id=kb_id,
-                    query=query,
-                    query_vector=query_vector,
-                    top_k=top_k * 2
-                )
-                if vector_results:
-                    results_lists.append(vector_results)
-                    weights.append(vector_weight)
-            
-            if query_sparse_vector is not None and sparse_weight > 0:
-                # 如果有稀疏向量但不是Qdrant，需要特殊处理
-                # 这里可以实现基于稀疏向量的检索逻辑
-                # 暂时先跳过
-                pass
-            
-            if query_tokens and keyword_weight > 0:
-                # 关键词检索
-                keyword_results = await self.keyword_search(
-                    kb_id=kb_id,
-                    query=query,
-                    query_tokens=query_tokens,
-                    top_k=top_k * 2
-                )
-                if keyword_results:
-                    results_lists.append(keyword_results)
-                    weights.append(keyword_weight)
-        
-        # 4. 如果没有有效的检索结果，直接返回空列表
-        if not results_lists:
-            return []
-        
-        # 5. 融合结果
-        if len(results_lists) == 1:
-            # 只有一种检索结果，直接返回前top_k个
-            return results_lists[0][:top_k]
-        else:
-            # 多种检索结果，使用RRF融合
-            fused_results = RRFFusion.fusion(
-                results_lists=results_lists,
-                k=rrf_k,
-                weights=weights if len(weights) == len(results_lists) else None
-            )
-            return fused_results[:top_k]
-    
-    async def generate_sparse_vector(self, kb_id: str, text: str, method: str = "bm25") -> Dict[str, float]:
-        """
-        生成稀疏向量
-        
-        Args:
-            kb_id: 知识库ID
-            text: 输入文本
-            method: 稀疏向量生成方法 ('bm25', 'tf-idf', 'simple', 'splade')
-            
-        Returns:
-            稀疏向量 {token: weight}
-        """
-        # 获取知识库信息
-        kb = await self.kb_service.get_knowledge_base(kb_id)
-        if not kb:
-            logger.warning(f"知识库不存在: {kb_id}")
-            return {}
-        
-        # 创建稀疏向量服务
-        try:
-            sparse_service = SparseVectorServiceFactory.create(method)
-        except Exception as e:
-            logger.error(f"创建稀疏向量服务失败: {e}")
-            return {}
-        
-        # 如果是BM25或TF-IDF方法，需要从知识库获取文档统计信息
-        if method == "bm25" or method == "tf-idf":
-            # 获取文档服务
-            from app.services.document import DocumentService
-            doc_service = DocumentService()
-            
-            # 获取知识库中的所有文档
-            docs, _ = await doc_service.list_documents(kb_id=kb_id)
-            
-            # 收集所有文档内容
-            doc_contents = []
-            for doc in docs:
-                # 如果文档有内容，直接使用内容
-                if doc.content:
-                    doc_contents.append(doc.content)
-                else:
-                    # 否则获取文档的分块内容
-                    chunks, _ = await doc_service.list_document_chunks(document_id=doc.id)
-                    for chunk in chunks:
-                        if chunk.content:
-                            doc_contents.append(chunk.content)
-            
-            # 批量添加文档到稀疏向量服务中
-            if doc_contents:
-                # 使用批量添加方法
-                sparse_service.add_documents(doc_contents)
-        
-        # 生成稀疏向量
-        try:
-            sparse_vector = sparse_service.generate_sparse_vector(text)
-            return sparse_vector
-        except Exception as e:
-            logger.error(f"生成稀疏向量失败: {e}")
-            return {}
-
 
 class BM25:
     """BM25算法实现"""

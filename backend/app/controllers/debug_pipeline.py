@@ -65,6 +65,8 @@ class UnifiedSearchRequest(BaseModel):
     keyword_weight: float = Field(0.3, description="关键词权重（加权平均时使用）", ge=0, le=1)
     score_threshold: float = Field(0.0, description="分数阈值", ge=0, le=1)
 
+    
+
 
 class HybridSearchRequest(BaseModel):
     """混合检索请求"""
@@ -1217,29 +1219,28 @@ async def unified_search(request: UnifiedSearchRequest):
                 ))
         
         elif request.retrieval_mode == "keyword":
-            # 纳关键词检索（基于稀疏向量）
+            # 关键词检索（基于稀疏向量）
             results = await retrieval_service.keyword_search(
                 kb_id=request.kb_id,
                 query=request.query,
-                query_tokens=None,
                 top_k=request.top_k,
                 score_threshold=request.score_threshold
             )
         
         elif request.retrieval_mode == "hybrid":
-            # 根据融合方法选择合适的策略，并传递权重参数
-            results = await retrieval_service.hybrid_search(
+            # 根据融合方法选择Qdrant的融合策略
+            fusion_strategy = "rrf" if request.fusion_method == "rrf" else "dbsf"
+            results_data = await retrieval_service.hybrid_search(
                 kb_id=request.kb_id,
                 query=request.query,
-                query_vector=None,
-                query_tokens=None,
                 top_k=request.top_k,
                 score_threshold=request.score_threshold,
-                vector_weight=request.semantic_weight,
+                semantic_weight=request.semantic_weight,
                 keyword_weight=request.keyword_weight,
                 rrf_k=request.rrf_k,
-                fusion=request.fusion_method
+                fusion=fusion_strategy
             )
+            results = results_data
         
         # 转换为字典
         results_data = [r.to_dict() for r in results]
