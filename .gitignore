@@ -32,7 +32,7 @@ env.bak/
 venv.bak/
 
 # resources
-backend/resources/
+backend/resources/*
 
 # IDE
 .vscode/
