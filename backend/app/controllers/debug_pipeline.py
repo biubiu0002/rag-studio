@@ -53,6 +53,21 @@ class EmbedRequest(BaseModel):
     provider: str = Field("ollama", description="Embedding服务提供商")
 
 
+class UnifiedSearchRequest(BaseModel):
+    """统一检索请求"""
+    kb_id: str = Field(..., description="知识库ID")
+    query: str = Field(..., description="查询文本")
+    retrieval_mode: str = Field("hybrid", description="检索模式: semantic, keyword, hybrid")
+    top_k: int = Field(10, description="返回数量")
+    fusion_method: str = Field("rrf", description="混合检索融合方法: rrf, weighted")
+    rrf_k: int = Field(60, description="RRF参数k", ge=1)
+    semantic_weight: float = Field(0.7, description="语义向量权重（加权平均时使用）", ge=0, le=1)
+    keyword_weight: float = Field(0.3, description="关键词权重（加权平均时使用）", ge=0, le=1)
+    score_threshold: float = Field(0.0, description="分数阈值", ge=0, le=1)
+
+    
+
+
 class HybridSearchRequest(BaseModel):
     """混合检索请求"""
     kb_id: str = Field(..., description="知识库ID")
@@ -1136,139 +1151,96 @@ async def write_keyword_index(request: WriteKeywordIndexRequest):
         logger.error(f"关键词索引写入失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"写入失败: {str(e)}")
 
-
 # ========== 步骤5: 检索调试 ==========
 
-@router.post("/retrieve/hybrid", summary="混合检索")
-async def hybrid_search(request: HybridSearchRequest):
+@router.post("/retrieve/unified", summary="统一检索接口")
+async def unified_search(request: UnifiedSearchRequest):
     """
-    执行混合检索（向量 + 关键词 + RRF融合）
+    统一检索接口，支持三种模式：
+    - semantic: 语义向量检索（基于稠密向量）
+    - keyword: 关键词检索（基于稀疏向量/BM25）
+    - hybrid: 混合检索（语义+关键词融合）
+    
+    融合方法：
+    - rrf: 基于排名的倒数融合
+    - weighted: 加权平均融合
     
     Returns:
         检索结果
     """
     try:
-        # 1. 对查询进行向量化
-        embedding_service = EmbeddingServiceFactory.create(
-            provider=EmbeddingProvider.OLLAMA,
-            model_name=request.embedding_model
-        )
-        query_vector = await embedding_service.embed_text(request.query)
-        
-        # 2. 对查询进行分词
-        tokenizer = get_tokenizer_service()
-        query_tokens = tokenizer.tokenize(request.query, mode=request.tokenize_mode)
-        
-        # 3. 执行混合检索
-        retrieval_service = RetrievalService()
-        results = await retrieval_service.hybrid_search(
-            kb_id=request.kb_id,
-            query=request.query,
-            query_vector=query_vector,
-            query_tokens=query_tokens,
-            top_k=request.top_k,
-            vector_weight=request.vector_weight,
-            keyword_weight=request.keyword_weight,
-            rrf_k=request.rrf_k
-        )
-        
-        # 转换为字典
-        results_data = [r.to_dict() for r in results]
-        
-        return JSONResponse(
-            content=success_response(
-                data={
-                    "query": request.query,
-                    "query_tokens": query_tokens,
-                    "results": results_data,
-                    "config": {
-                        "top_k": request.top_k,
-                        "vector_weight": request.vector_weight,
-                        "keyword_weight": request.keyword_weight,
-                        "rrf_k": request.rrf_k
-                    }
-                },
-                message=f"检索完成: {len(results)} 个结果"
-            )
-        )
-        
-    except Exception as e:
-        logger.error(f"混合检索失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"检索失败: {str(e)}")
-
-
-# ========== Qdrant混合检索 ==========
-
-@router.post("/retrieve/qdrant-hybrid", summary="Qdrant原生混合检索")
-async def qdrant_hybrid_search(request: QdrantHybridSearchRequest):
-    """
-    执行Qdrant原生混合检索（稠密向量 + 稀疏向量）
-    
-    Returns:
-        检索结果
-    """
-    try:
-        # 1. 如果没有提供查询向量，则对查询进行向量化
-        query_vector = request.query_vector
-        if query_vector is None:
-            embedding_service = EmbeddingServiceFactory.create(
-                provider=EmbeddingProvider.OLLAMA,
-                model_name=request.embedding_model
-            )
-            query_vector = await embedding_service.embed_text(request.query)
-        
-        # 2. 如果没有提供稀疏向量且需要生成，则生成稀疏向量
-        query_sparse_vector = request.query_sparse_vector
-        if query_sparse_vector is None and request.generate_sparse_vector:
-            # 获取知识库信息以确定稀疏向量生成方法
-            from app.services.knowledge_base import KnowledgeBaseService
-            kb_service = KnowledgeBaseService()
-            kb_schema = await kb_service.get_knowledge_base_schema(request.kb_id)
-            
-            # 确定稀疏向量生成方法
-            sparse_method = "bm25"  # 默认使用BM25
-            if kb_schema:
-                # 从知识库schema中找到稀疏向量字段及其配置的生成方法
-                for field in kb_schema.get("fields", []):
-                    if field.get("type") == "sparse_vector" and "sparseMethod" in field:
-                        sparse_method = field["sparseMethod"]
-                        break
-            
-            # 生成稀疏向量
-            try:
-                from app.services.retrieval_service import RetrievalService
-                retrieval_service = RetrievalService()
-                sparse_vector_dict = await retrieval_service.generate_sparse_vector(
-                    kb_id=request.kb_id,
-                    text=request.query,
-                    method=sparse_method
-                )
-                
-                # 转换为Qdrant格式
-                if sparse_vector_dict:
-                    from app.services.sparse_vector_service import convert_sparse_vector_to_qdrant_format
-                    indices, values = convert_sparse_vector_to_qdrant_format(sparse_vector_dict)
-                    query_sparse_vector = {
-                        "indices": indices,
-                        "values": values
-                    }
-            except Exception as e:
-                logger.warning(f"生成稀疏向量失败: {e}")
-                # 如果生成失败，继续使用None
-        
-        # 3. 执行Qdrant原生混合检索
-        # 确保在所有情况下都初始化retrieval_service
+        from app.services.knowledge_base import KnowledgeBaseService
+        from app.services.vector_db_service import VectorDBServiceFactory
+        from app.models.knowledge_base import VectorDBType
         from app.services.retrieval_service import RetrievalService
+        
+        
+        # 获取知识库配置
+        kb_service = KnowledgeBaseService()
+        kb = await kb_service.get_knowledge_base(request.kb_id)
+        if not kb:
+            raise HTTPException(status_code=404, detail=f"知识库不存在: {request.kb_id}")
         retrieval_service = RetrievalService()
-        results = await retrieval_service.qdrant_hybrid_search(
-            kb_id=request.kb_id,
-            query=request.query,
-            query_vector=query_vector,
-            query_sparse_vector=query_sparse_vector,
-            top_k=request.top_k,
-            score_threshold=request.score_threshold,
-            fusion=request.fusion
+        # 获取知识库绑定的embedding服务和分词服务配置
+        embedding_service = EmbeddingServiceFactory.create(
+            provider=kb.embedding_provider,
+            model_name=kb.embedding_model
         )
+        
+        # 获取向量数据库服务
+        vector_db_service = VectorDBServiceFactory.create(
+            VectorDBType(kb.vector_db_type),
+            config=kb.vector_db_config if kb.vector_db_config else None
+        )
+        
+        results = []
+        
+        if request.retrieval_mode == "semantic":
+            # 纯语义向量检索
+            query_vector = await embedding_service.embed_text(request.query)
+            search_results = await vector_db_service.search(
+                collection_name=request.kb_id,
+                query_vector=query_vector,
+                top_k=request.top_k,
+                score_threshold=request.score_threshold
+            )
+            
+            # 转换结果格式
+            from app.services.retrieval_service import RetrievalResult
+            for idx, result in enumerate(search_results):
+                results.append(RetrievalResult(
+                    doc_id=result.get("id", ""),
+                    chunk_id=result.get("payload", {}).get("chunk_id", ""),
+                    content=result.get("payload", {}).get("content", ""),
+                    score=result.get("score", 0.0),
+                    rank=idx + 1,
+                    source="semantic",
+                    metadata=result.get("payload", {})
+                ))
+        
+        elif request.retrieval_mode == "keyword":
+            # 关键词检索（基于稀疏向量）
+            results = await retrieval_service.keyword_search(
+                kb_id=request.kb_id,
+                query=request.query,
+                top_k=request.top_k,
+                score_threshold=request.score_threshold
+            )
+        
+        elif request.retrieval_mode == "hybrid":
+            # 根据融合方法选择Qdrant的融合策略
+            fusion_strategy = "rrf" if request.fusion_method == "rrf" else "dbsf"
+            results_data = await retrieval_service.hybrid_search(
+                kb_id=request.kb_id,
+                query=request.query,
+                top_k=request.top_k,
+                score_threshold=request.score_threshold,
+                semantic_weight=request.semantic_weight,
+                keyword_weight=request.keyword_weight,
+                rrf_k=request.rrf_k,
+                fusion=fusion_strategy
+            )
+            results = results_data
         
         # 转换为字典
         results_data = [r.to_dict() for r in results]
@@ -1279,18 +1251,30 @@ async def qdrant_hybrid_search(request: QdrantHybridSearchRequest):
                     "query": request.query,
                     "results": results_data,
                     "config": {
+                        "retrieval_mode": request.retrieval_mode,
                         "top_k": request.top_k,
-                        "score_threshold": request.score_threshold,
-                        "fusion": request.fusion
+                        "fusion_method": request.fusion_method,
+                        "rrf_k": request.rrf_k,
+                        "semantic_weight": request.semantic_weight,
+                        "keyword_weight": request.keyword_weight
+                    },
+                    "metadata": {
+                        "embedding_model": kb.embedding_model,
+                        "embedding_provider": kb.embedding_provider.value,
+                        "vector_db_type": kb.vector_db_type
                     }
                 },
-                message=f"Qdrant混合检索完成: {len(results)} 个结果"
+                message=f"{request.retrieval_mode}检索完成: {len(results)} 个结果"
             )
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Qdrant混合检索失败: {e}", exc_info=True)
+        logger.error(f"检索失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"检索失败: {str(e)}")
+
+
 
 
 # ========== 工具接口 ==========
@@ -1556,40 +1540,28 @@ async def generate_sparse_vector(request: SparseVectorRequest):
         稀疏向量和Qdrant格式
     """
     try:
-        # 如果kb_id是temp_kb或为空，则使用独立的稀疏向量服务（不依赖知识库）
-        if request.kb_id == "temp_kb" or not request.kb_id:
-            # 直接使用稀疏向量服务，不依赖知识库
-            from app.services.sparse_vector_service import SparseVectorServiceFactory
-            
-            # 创建稀疏向量服务
-            sparse_service = SparseVectorServiceFactory.create(request.method)
-            
-            # 生成稀疏向量
-            sparse_vector = sparse_service.generate_sparse_vector(request.text)
-        else:
-            # 使用知识库相关的稀疏向量生成（会使用知识库的文档统计信息）
-            retrieval_service = RetrievalService()
-            sparse_vector = await retrieval_service.generate_sparse_vector(
-                kb_id=request.kb_id,
-                text=request.text,
-                method=request.method
-            )
+        # 直接使用稀疏向量服务
+        from app.services.sparse_vector_service import SparseVectorServiceFactory
         
+        # 创建稀疏向量服务
+        sparse_service = SparseVectorServiceFactory.create(request.method)
+        
+        # 生成稀疏向量
+        sparse_vector = sparse_service.generate_document_sparse_vector(request.text)
+
         # 转换为Qdrant格式
-        indices, values = convert_sparse_vector_to_qdrant_format(sparse_vector)
+        
+        qdrant_sparse_vector = sparse_service.convert_to_qdrant_format(sparse_vector)
         
         return JSONResponse(
             content=success_response(
                 data={
                     "sparse_vector": sparse_vector,
-                    "qdrant_format": {
-                        "indices": indices,
-                        "values": values
-                    },
-                    "sparsity": len(indices),  # 非零元素数量
+                    "qdrant_format": qdrant_sparse_vector,
+                    "sparsity": len(sparse_vector),  # 非零元素数量
                     "total_tokens": len(sparse_vector)  # 总token数量
                 },
-                message=f"稀疏向量生成完成: {len(indices)} 个非零元素"
+                message=f"稀疏向量生成完成: {len(sparse_vector)} 个非零元素"
             )
         )
         

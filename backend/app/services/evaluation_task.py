@@ -230,7 +230,7 @@ class EvaluationTaskService:
                 top_k = retrieval_config.get("top_k", 10)
                 
                 # 使用知识库的检索服务
-                results = await retrieval_service.qdrant_hybrid_search(
+                results = await retrieval_service.hybrid_search(
                     kb_id=task.kb_id,
                     query=test_case.question,
                     query_vector=None,  # 自动生成

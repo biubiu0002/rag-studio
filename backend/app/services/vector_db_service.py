@@ -660,86 +660,130 @@ class QdrantService(BaseVectorDBService):
         score_threshold: float = 0.0,
         fusion: str = "rrf",
         dense_vector_name: str = "dense",
-        sparse_vector_name: str = "sparse_vector"
+        sparse_vector_name: str = "sparse_vector",
+        semantic_weight: float = 0.7,
+        keyword_weight: float = 0.3,
+        rrf_k: int = 10
     ) -> List[Dict[str, Any]]:
         """
         Qdrant原生混合检索（稠密向量+稀疏向量）
         
+        支持两种融合方法:
+        1. RRF (Reciprocal Rank Fusion): 基于排名倒数的融合方法，综合多个检索结果的排名
+        2. DBSF (Density-Based Spatial Fusion): 基于得分的融合方法，综合多个检索结果的得分
+        
         Args:
             collection_name: 集合名称
             query_vector: 稠密查询向量
-            query_sparse_vector: 稀疏查询向量 (indices和values的字典)
+            query_sparse_vector: 稀疏查询向量 (包含 indices 和 values 的字典)
             top_k: 返回数量
-            score_threshold: 分数阈值
-            fusion: 融合方法 ("rrf" 或 "dbsf")
+            score_threshold: 分数阈值（对RRF和DBSF都生效，用于过滤最终结果）
+            fusion: 融合方法 ("rrf" 或 "dbsf"，默认 "rrf")
             dense_vector_name: 稠密向量字段名称
             sparse_vector_name: 稀疏向量字段名称
+            semantic_weight: 稠密向量权重（用于DBSF加权融合）
+            keyword_weight: 稀疏向量权重（用于DBSF加权融合）
+            rrf_k: RRF融合参数k值（默认10）
             
         Returns:
-            检索结果列表
+            检索结果列表，包含id、score、payload信息，所有结果均满足score_threshold阈值
+            
+        Raises:
+            ImportError: 如果Qdrant客户端版本不支持混合检索
         """
+        # 验证融合方法参数
+        fusion_lower = fusion.lower()
+        if fusion_lower not in ["rrf", "dbsf"]:
+            print(f"Warning: Unknown fusion method '{fusion}', using 'rrf' instead")
+            fusion_lower = "rrf"
+        
+        # 检查是否有足够的检索源
+        if not query_sparse_vector or "indices" not in query_sparse_vector or "values" not in query_sparse_vector:
+            # 如果没有稀疏向量，只进行稠密向量检索
+            print("Warning: No sparse vector provided, falling back to dense vector search only")
+            return await self.search(collection_name, query_vector, top_k, score_threshold, dense_vector_name)
+        
         try:
-            from qdrant_client.http.models import Fusion, Prefetch
+            from qdrant_client.http.models import Fusion, Prefetch, FusionQuery, SparseVector
         except ImportError:
             # 如果Qdrant客户端版本不支持混合检索，回退到普通向量检索
+            print("Warning: Qdrant client does not support hybrid search, falling back to vector search")
             return await self.search(collection_name, query_vector, top_k, score_threshold, dense_vector_name)
         
         # 从集合配置中获取实际的向量字段名称
+        actual_dense_vector_name = dense_vector_name
+        actual_sparse_vector_name = sparse_vector_name
         try:
             collection_info = self.client.get_collection(collection_name)
             if hasattr(collection_info, 'config') and hasattr(collection_info.config, 'params'):
                 vectors_config = collection_info.config.params.vectors
                 if isinstance(vectors_config, dict):
                     # 获取第一个稠密向量字段名称
-                    dense_vector_name = next(iter(vectors_config.keys()), dense_vector_name)
+                    actual_dense_vector_name = next(iter(vectors_config.keys()), dense_vector_name)
                 
                 # 获取稀疏向量字段名称
                 if hasattr(collection_info.config.params, 'sparse_vectors'):
                     sparse_vectors_config = collection_info.config.params.sparse_vectors
                     if isinstance(sparse_vectors_config, dict) and len(sparse_vectors_config) > 0:
-                        sparse_vector_name = next(iter(sparse_vectors_config.keys()), sparse_vector_name)
+                        actual_sparse_vector_name = next(iter(sparse_vectors_config.keys()), sparse_vector_name)
         except Exception as e:
             print(f"Warning: Failed to get collection config: {e}")
         
-        # 构建预取查询
-        prefetch = [
-            Prefetch(
-                query=query_vector,
-                using=dense_vector_name,
-                limit=top_k * 2  # 获取更多候选结果
-            )
-        ]
+        # 构建预取查询列表
+        prefetch_queries = []
         
-        # 如果提供了稀疏向量，添加稀疏向量预取查询
-        if query_sparse_vector and "indices" in query_sparse_vector and "values" in query_sparse_vector:
-            try:
-                from qdrant_client.http.models import SparseVector
-                sparse_vector = SparseVector(
-                    indices=query_sparse_vector["indices"],
-                    values=query_sparse_vector["values"]
+        # 添加稠密向量预取查询
+        try:
+            prefetch_queries.append(
+                Prefetch(
+                    query=query_vector,
+                    using=actual_dense_vector_name,
+                    limit=max(top_k * 3, 20)  # 获取足够的候选结果用于融合
                 )
-                prefetch.append(
-                    Prefetch(
-                        query=sparse_vector,
-                        using=sparse_vector_name,
-                        limit=top_k * 2
-                    )
+            )
+        except Exception as e:
+            print(f"Error: Failed to create dense vector prefetch: {e}")
+            return await self.search(collection_name, query_vector, top_k, score_threshold, dense_vector_name)
+        
+        # 添加稀疏向量预取查询
+        try:
+            # 由于已经检查了query_sparse_vector，这里可以安全地访问
+            assert query_sparse_vector is not None
+            sparse_vector = SparseVector(
+                indices=query_sparse_vector["indices"],
+                values=query_sparse_vector["values"]
+            )
+            prefetch_queries.append(
+                Prefetch(
+                    query=sparse_vector,
+                    using=actual_sparse_vector_name,
+                    limit=max(top_k * 3, 20)  # 获取足够的候选结果用于融合
                 )
-            except Exception as e:
-                # 如果稀疏向量格式不正确，忽略稀疏向量检索
-                print(f"Warning: Failed to create sparse vector prefetch: {e}")
+            )
+        except Exception as e:
+            print(f"Error: Failed to create sparse vector prefetch: {e}")
+            # 如果稀疏向量创建失败，回退到稠密向量搜索
+            return await self.search(collection_name, query_vector, top_k, score_threshold, dense_vector_name)
         
         # 执行混合检索
         try:
-            # 根据融合方法选择相应的Fusion类型
-            from qdrant_client.http.models import FusionQuery
-            fusion_type = Fusion.RRF if fusion.lower() == "rrf" else Fusion.DBSF
+            # 选择融合策略
+            if fusion_lower == "rrf":
+                # RRF (Reciprocal Rank Fusion)
+                # 基于排名的融合，对不同搜索结果排名的倒数加权
+                fusion_type = Fusion.RRF
+            else:
+                # DBSF (Density-Based Spatial Fusion)
+                # 基于得分的融合，直接对多个搜索结果的得分加权
+                fusion_type = Fusion.DBSF
+            
             fusion_query = FusionQuery(fusion=fusion_type)
             
+            # 执行查询
             search_result = self.client.query_points(
                 collection_name=collection_name,
-                prefetch=prefetch,
-                query=fusion_query,  # 使用FusionQuery对象
+                prefetch=prefetch_queries,
+                query=fusion_query,
                 limit=top_k,
                 score_threshold=score_threshold
             )
@@ -747,18 +791,25 @@ class QdrantService(BaseVectorDBService):
             # 转换结果格式
             results = []
             for scored_point in search_result.points:
+                # 验证得分是否满足阈值
+                if scored_point.score < score_threshold:
+                    continue
+                    
                 result = {
                     "id": scored_point.id,
                     "score": scored_point.score,
-                    "payload": scored_point.payload
+                    "payload": scored_point.payload if scored_point.payload else {}
                 }
                 results.append(result)
             
-            return results
+            # 确保返回的结果数不超过top_k
+            return results[:top_k]
+            
         except Exception as e:
-            # 如果混合检索失败，回退到普通向量检索
-            print(f"Hybrid search failed, falling back to vector search: {e}")
-            return await self.search(collection_name, query_vector, top_k, score_threshold, dense_vector_name)
+            print(f"Hybrid search ({fusion_lower.upper()}) failed: {str(e)}")
+            print(f"Falling back to dense vector search only")
+            # 如果混合检索失败，回退到稠密向量检索
+            return await self.search(collection_name, query_vector, top_k, score_threshold, actual_dense_vector_name)
     
     async def delete_vectors(self, collection_name: str, ids: List[str]):
         """删除向量"""

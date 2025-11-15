@@ -450,7 +450,47 @@ class TestSetImportService:
                 doc_chunk.embedding_model = kb.embedding_model
                 await chunk_repo.update(doc_chunk.id, doc_chunk)
         
-        # 5. 写入向量数据库
+        # 5. 生成稀疏向量（如果schema配置了稀疏向量字段）
+        sparse_vectors = []
+        sparse_vector_method = None
+        
+        # 检查schema中是否配置了稀疏向量字段
+        has_sparse_vector_field = False
+        if kb_schema:
+            for field in kb_schema.get("fields", []):
+                if field.get("type") == "sparse_vector":
+                    has_sparse_vector_field = True
+                    # 从字段配置中获取生成方法，默认为 bm25
+                    sparse_vector_method = field.get("method", "bm25")
+                    break
+        
+        # 如果配置了稀疏向量字段，生成稀疏向量
+        if has_sparse_vector_field and sparse_vector_method:
+            try:
+                from app.services.sparse_vector_service import SparseVectorServiceFactory, convert_sparse_vector_to_qdrant_format
+                
+                # 创建稀疏向量服务
+                sparse_service = SparseVectorServiceFactory.create(sparse_vector_method)
+                
+                # 为所有chunk文本添加到语料库（用于计算IDF等统计信息）
+                sparse_service.add_documents(chunk_contents)
+                
+                # 为每个chunk生成稀疏向量
+                for chunk_content in chunk_contents:
+                    sparse_vector_dict = sparse_service.generate_sparse_vector(chunk_content)
+                    # 转换为Qdrant格式 (indices, values)
+                    indices, values = convert_sparse_vector_to_qdrant_format(sparse_vector_dict)
+                    sparse_vectors.append({
+                        "indices": indices,
+                        "values": values
+                    })
+                
+                logger.info(f"为文档 {document.id} 生成了 {len(sparse_vectors)} 个稀疏向量")
+            except Exception as e:
+                logger.warning(f"生成稀疏向量失败: {e}，将跳过稀疏向量")
+                sparse_vectors = []
+        
+        # 6. 写入向量数据库
         vector_db_service = VectorDBServiceFactory.create(
             VectorDBType(kb.vector_db_type),
             config=kb.vector_db_config if kb.vector_db_config else None
@@ -533,10 +573,22 @@ class TestSetImportService:
                 vector_field_name = field.get("name", "dense")
                 break
         
-        # 构建向量数据（Qdrant格式）
+        # 确定稀疏向量字段名称
+        sparse_vector_field_name = "sparse_vector"
+        for field in schema_fields:
+            if field.get("type") == "sparse_vector":
+                sparse_vector_field_name = field.get("name", "sparse_vector")
+                break
+        
+        # 构建向量数据（包括密集向量和稀疏向量）
         vectors_to_insert = []
         for i, embedding in enumerate(embeddings):
             vector_data = {vector_field_name: embedding}
+            
+            # 添加稀疏向量（如果生成了）
+            if i < len(sparse_vectors):
+                vector_data[sparse_vector_field_name] = sparse_vectors[i]
+            
             vectors_to_insert.append(vector_data)
         
         # 写入向量数据库

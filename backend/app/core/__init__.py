@@ -3,3 +3,6 @@
 包含异常处理、中间件、响应格式等
 """
 
+from app.core.singleton import singleton
+
+__all__ = ["singleton"]

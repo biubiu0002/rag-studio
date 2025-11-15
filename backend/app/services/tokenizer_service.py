@@ -6,10 +6,12 @@
 from typing import List, Dict, Set, Optional
 from collections import Counter
 import logging
+from app.core.singleton import singleton
 
 logger = logging.getLogger(__name__)
 
 
+@singleton
 class TokenizerService:
     """分词服务"""
     
@@ -263,14 +265,7 @@ class TokenizerService:
             return []
 
 
-# 全局单例
-_tokenizer_instance = None
-
-
 def get_tokenizer_service() -> TokenizerService:
     """获取分词服务单例"""
-    global _tokenizer_instance
-    if _tokenizer_instance is None:
-        _tokenizer_instance = TokenizerService()
-    return _tokenizer_instance
+    return TokenizerService()
 

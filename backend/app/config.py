@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     STORAGE_TYPE: str = Field(default="json", description="存储类型: json 或 mysql")
     STORAGE_PATH: str = Field(default=os.path.join(PROJECT_ROOT, "storage"), description="JSON文件存储路径")
     
+    # 模型配置
+    MODELS_PATH: str = Field(default=os.path.join(PROJECT_ROOT, "resources", "models"), description="模型文件存储路径")
+    BM25_MODEL_NAME: str = Field(default="bm25_zh_default.json", description="BM25模型文件名")
+    BM25_MODEL_URL: str = Field(default="http://dashvector-data.oss-cn-beijing.aliyuncs.com/public/sparsevector/bm25_zh_default.json", description="BM25模型下载URL")
+    
     # Ollama配置
     OLLAMA_BASE_URL: str = Field(default="http://localhost:11434", description="Ollama服务地址")
     OLLAMA_EMBEDDING_MODEL: str = Field(default="nomic-embed-text", description="嵌入模型")

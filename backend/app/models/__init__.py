@@ -1,5 +1,5 @@
 """
-数据模型模块
+数据模型和模型管理模块
 """
 
 from app.models.base import BaseModelMixin

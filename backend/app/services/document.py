@@ -11,8 +11,10 @@ from app.models.document import Document, DocumentChunk, DocumentStatus, Documen
 from app.repositories.factory import RepositoryFactory
 from app.core.exceptions import NotFoundException, BadRequestException
 from app.config import settings
+from app.core.singleton import singleton
 
 
+@singleton
 class DocumentService:
     """文档服务"""
     

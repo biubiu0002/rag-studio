@@ -10,8 +10,10 @@ from app.models.knowledge_base import KnowledgeBase
 from app.schemas.knowledge_base import KnowledgeBaseCreate, KnowledgeBaseUpdate
 from app.services.knowledge_base_storage import KnowledgeBaseStorageService
 from app.core.exceptions import NotFoundException, ConflictException
+from app.core.singleton import singleton
 
 
+@singleton
 class KnowledgeBaseService:
     """知识库服务 - 使用 debug_results 存储机制"""
     
