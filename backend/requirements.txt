@@ -35,6 +35,7 @@ python-dotenv==1.0.0
 python-multipart==0.0.6
 aiofiles==23.2.1
 httpx==0.25.2
+dashtext>=0.2.0
 
 # Development
 pytest==7.4.3

@@ -18,10 +18,12 @@ from app.schemas.test import (
 )
 from app.repositories.factory import RepositoryFactory
 from app.core.exceptions import NotFoundException
+from app.core.singleton import singleton
 
 logger = logging.getLogger(__name__)
 
 
+@singleton
 class RetrieverTestCaseService:
     """检索器测试用例服务"""
     
@@ -274,7 +276,7 @@ class RetrieverTestCaseService:
         
         return test_case
 
-
+@singleton
 class GenerationTestCaseService:
     """生成测试用例服务"""
     

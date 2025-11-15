@@ -1177,6 +1177,26 @@ export const debugAPI = {
   },
 
   /**
+   * 统一检索接口
+   */
+  unifiedSearch: async (data: {
+    kb_id: string
+    query: string
+    retrieval_mode?: "semantic" | "keyword" | "hybrid"
+    top_k?: number
+    fusion_method?: "rrf" | "weighted"
+    rrf_k?: number
+    semantic_weight?: number
+    keyword_weight?: number
+    score_threshold?: number
+  }) => {
+    return request<{ success: boolean; data: any }>('/debug/retrieve/unified', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  /**
    * 混合检索
    */
   hybridSearch: async (data: {

@@ -15,16 +15,13 @@ export default function RetrievalView() {
   const [searchQuery, setSearchQuery] = useState<string>("")
   const [searchResults, setSearchResults] = useState<any>(null)
   const [searchConfig, setSearchConfig] = useState({
+    retrieval_mode: "hybrid" as "semantic" | "keyword" | "hybrid",
     top_k: 5,
-    vector_weight: 0.7,
-    keyword_weight: 0.3,
+    score_threshold: 0.0,
+    fusion_method: "rrf" as "rrf" | "weighted",
     rrf_k: 60,
-    embedding_model: "bge-m3:latest",
-    tokenize_mode: "search"
-  })
-  const [sparseVectorConfig, setSparseVectorConfig] = useState({
-    method: "bm25" as "bm25" | "tf" | "simple" | "splade",
-    generate_sparse: false
+    semantic_weight: 0.7,
+    keyword_weight: 0.3
   })
   const [savedResults, setSavedResults] = useState<SavedResult[]>([])
   const [selectedResultId, setSelectedResultId] = useState<string>("")
@@ -58,7 +55,7 @@ export default function RetrievalView() {
     }
   }
 
-  // 执行混合检索
+  // 执行检索
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
       showToast("请输入查询文本", "warning")
@@ -72,46 +69,16 @@ export default function RetrievalView() {
     try {
       setLoading(true)
       
-      const result = await debugAPI.hybridSearch({
+      const result = await debugAPI.unifiedSearch({
         kb_id: kbId,
         query: searchQuery,
+        retrieval_mode: searchConfig.retrieval_mode,
         top_k: searchConfig.top_k,
-        vector_weight: searchConfig.vector_weight,
-        keyword_weight: searchConfig.keyword_weight,
+        score_threshold: searchConfig.score_threshold,
+        fusion_method: searchConfig.fusion_method,
         rrf_k: searchConfig.rrf_k,
-        embedding_model: searchConfig.embedding_model,
-        tokenize_mode: searchConfig.tokenize_mode
-      })
-      
-      setSearchResults(result.data)
-    } catch (error) {
-      console.error("检索失败:", error)
-      showToast("检索失败: " + (error as Error).message, "error")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // 执行Qdrant混合检索
-  const handleQdrantHybridSearch = async () => {
-    if (!searchQuery.trim()) {
-      showToast("请输入查询文本", "warning")
-      return
-    }
-    if (!kbId) {
-      showToast("请选择知识库", "warning")
-      return
-    }
-    
-    try {
-      setLoading(true)
-      
-      const result = await debugAPI.qdrantHybridSearch({
-        kb_id: kbId,
-        query: searchQuery,
-        top_k: searchConfig.top_k,
-        embedding_model: searchConfig.embedding_model,
-        generate_sparse_vector: sparseVectorConfig.generate_sparse
+        semantic_weight: searchConfig.semantic_weight,
+        keyword_weight: searchConfig.keyword_weight
       })
       
       setSearchResults(result.data)
@@ -280,118 +247,7 @@ export default function RetrievalView() {
 
       <Card>
         <CardHeader>
-          <CardTitle>步骤2: 配置检索参数</CardTitle>
-          <CardDescription>设置混合检索的参数</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-2">返回结果数 (top_k)</label>
-              <input
-                type="number"
-                value={searchConfig.top_k}
-                onChange={(e) => setSearchConfig({ ...searchConfig, top_k: parseInt(e.target.value) || 5 })}
-                className="w-full p-2 border rounded"
-                min="1"
-                max="50"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">RRF参数 (k)</label>
-              <input
-                type="number"
-                value={searchConfig.rrf_k}
-                onChange={(e) => setSearchConfig({ ...searchConfig, rrf_k: parseInt(e.target.value) || 60 })}
-                className="w-full p-2 border rounded"
-                min="1"
-                max="100"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">向量权重</label>
-              <input
-                type="number"
-                step="0.1"
-                value={searchConfig.vector_weight}
-                onChange={(e) => setSearchConfig({ ...searchConfig, vector_weight: parseFloat(e.target.value) || 0.7 })}
-                className="w-full p-2 border rounded"
-                min="0"
-                max="1"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">关键词权重</label>
-              <input
-                type="number"
-                step="0.1"
-                value={searchConfig.keyword_weight}
-                onChange={(e) => setSearchConfig({ ...searchConfig, keyword_weight: parseFloat(e.target.value) || 0.3 })}
-                className="w-full p-2 border rounded"
-                min="0"
-                max="1"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">Embedding模型</label>
-              <input
-                type="text"
-                value={searchConfig.embedding_model}
-                onChange={(e) => setSearchConfig({ ...searchConfig, embedding_model: e.target.value })}
-                className="w-full p-2 border rounded"
-                placeholder="bge-m3:latest"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">分词模式</label>
-              <select
-                value={searchConfig.tokenize_mode}
-                onChange={(e) => setSearchConfig({ ...searchConfig, tokenize_mode: e.target.value })}
-                className="w-full p-2 border rounded"
-              >
-                <option value="default">默认模式</option>
-                <option value="search">搜索引擎模式</option>
-                <option value="all">全模式</option>
-              </select>
-            </div>
-          </div>
-          
-          {/* 稀疏向量配置 */}
-          <div className="border-t pt-4">
-            <h3 className="text-sm font-medium mb-2">稀疏向量配置</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">稀疏向量算法</label>
-                <select
-                  value={sparseVectorConfig.method}
-                  onChange={(e) => setSparseVectorConfig({ ...sparseVectorConfig, method: e.target.value as "bm25" | "tf" | "simple" | "splade" })}
-                  className="w-full p-2 border rounded"
-                >
-                  <option value="bm25">BM25</option>
-                  <option value="tf">TF-IDF</option>
-                  <option value="simple">简单词频</option>
-                  <option value="splade">SPLADE</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">生成稀疏向量</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={sparseVectorConfig.generate_sparse}
-                    onChange={(e) => setSparseVectorConfig({ ...sparseVectorConfig, generate_sparse: e.target.checked })}
-                    className="w-4 h-4"
-                  />
-                  <span className="text-sm">自动生成稀疏向量</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>步骤3: 输入查询并检索</CardTitle>
+          <CardTitle>步骤2: 输入查询并检索</CardTitle>
           <CardDescription>输入查询文本，执行混合检索</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -405,19 +261,197 @@ export default function RetrievalView() {
             />
           </div>
 
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>步骤3: 配置检索参数</CardTitle>
+          <CardDescription>选择检索模式并设置相关参数</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* 检索模式选择 */}
+          <div>
+            <label className="block text-sm font-medium mb-2">检索模式</label>
+            <div className="grid grid-cols-3 gap-3">
+              <button
+                onClick={() => setSearchConfig({ ...searchConfig, retrieval_mode: "semantic" })}
+                className={`p-3 border rounded text-center transition-colors ${
+                  searchConfig.retrieval_mode === "semantic"
+                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                    : "border-gray-300 hover:border-blue-300"
+                }`}
+              >
+                <div className="font-medium">语义向量检索</div>
+                <div className="text-xs text-gray-500 mt-1">基于稠密向量的语义相似度</div>
+              </button>
+              <button
+                onClick={() => setSearchConfig({ ...searchConfig, retrieval_mode: "keyword" })}
+                className={`p-3 border rounded text-center transition-colors ${
+                  searchConfig.retrieval_mode === "keyword"
+                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                    : "border-gray-300 hover:border-blue-300"
+                }`}
+              >
+                <div className="font-medium">关键词检索</div>
+                <div className="text-xs text-gray-500 mt-1">基于稀疏向量的关键词匹配</div>
+              </button>
+              <button
+                onClick={() => setSearchConfig({ ...searchConfig, retrieval_mode: "hybrid" })}
+                className={`p-3 border rounded text-center transition-colors ${
+                  searchConfig.retrieval_mode === "hybrid"
+                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                    : "border-gray-300 hover:border-blue-300"
+                }`}
+              >
+                <div className="font-medium">混合检索</div>
+                <div className="text-xs text-gray-500 mt-1">语义+关键词融合</div>
+              </button>
+            </div>
+          </div>
+
+          {/* 基础参数 */}
           <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">返回结果数 (top_k)</label>
+              <input
+                type="number"
+                value={searchConfig.top_k}
+                onChange={(e) => setSearchConfig({ ...searchConfig, top_k: parseInt(e.target.value) || 5 })}
+                className="w-full p-2 border rounded"
+                min="1"
+                max="50"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">分数阈值 (score_threshold)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={searchConfig.score_threshold}
+                onChange={(e) => {
+                  const value = e.target.value === '' ? 0.0 : parseFloat(e.target.value);
+                  setSearchConfig({ ...searchConfig, score_threshold: isNaN(value) ? 0.0 : value });
+                }}
+                className="w-full p-2 border rounded"
+                min="0"
+                max="1"
+              />
+              <p className="text-xs text-gray-500 mt-1">只返回分数大于等于此阈值的结果 (0.0-1.0)</p>
+            </div>
+          </div>
+
+          {/* 混合检索专用参数 */}
+          {searchConfig.retrieval_mode === "hybrid" && (
+            <div className="border-t pt-4 space-y-4">
+              <h3 className="text-sm font-medium">混合检索融合策略</h3>
+              
+              {/* 融合方法选择 */}
+              <div>
+                <label className="block text-sm font-medium mb-2">融合方法</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setSearchConfig({ ...searchConfig, fusion_method: "rrf" })}
+                    className={`p-2 border rounded text-center transition-colors ${
+                      searchConfig.fusion_method === "rrf"
+                        ? "border-blue-500 bg-blue-50 text-blue-700"
+                        : "border-gray-300 hover:border-blue-300"
+                    }`}
+                  >
+                    <div className="font-medium">RRF融合</div>
+                    <div className="text-xs text-gray-500 mt-1">基于排名的倒数融合</div>
+                  </button>
+                  <button
+                    onClick={() => setSearchConfig({ ...searchConfig, fusion_method: "weighted" })}
+                    className={`p-2 border rounded text-center transition-colors ${
+                      searchConfig.fusion_method === "weighted"
+                        ? "border-blue-500 bg-blue-50 text-blue-700"
+                        : "border-gray-300 hover:border-blue-300"
+                    }`}
+                  >
+                    <div className="font-medium">加权平均</div>
+                    <div className="text-xs text-gray-500 mt-1">基于分数的加权融合</div>
+                  </button>
+                </div>
+              </div>
+
+              {/* RRF参数 */}
+              {searchConfig.fusion_method === "rrf" && (
+                <div>
+                  <label className="block text-sm font-medium mb-2">RRF参数 (k)</label>
+                  <input
+                    type="number"
+                    value={searchConfig.rrf_k}
+                    onChange={(e) => setSearchConfig({ ...searchConfig, rrf_k: parseInt(e.target.value) || 60 })}
+                    className="w-full p-2 border rounded"
+                    min="1"
+                    max="100"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">RRF公式: 1/(k + rank)，k值越大，排名差异的影响越小</p>
+                </div>
+              )}
+
+              {/* 加权平均参数 */}
+              {searchConfig.fusion_method === "weighted" && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">语义向量权重</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={searchConfig.semantic_weight}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? 0.7 : parseFloat(e.target.value)
+                        const roundedVal = Math.round(val * 100) / 100
+                        const complementVal = Math.round((1 - roundedVal) * 100) / 100
+                        setSearchConfig({ 
+                          ...searchConfig, 
+                          semantic_weight: roundedVal,
+                          keyword_weight: complementVal
+                        })
+                      }}
+                      className="w-full p-2 border rounded"
+                      min="0"
+                      max="1"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">关键词权重</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={searchConfig.keyword_weight}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? 0.3 : parseFloat(e.target.value)
+                        const roundedVal = Math.round(val * 100) / 100
+                        const complementVal = Math.round((1 - roundedVal) * 100) / 100
+                        setSearchConfig({ 
+                          ...searchConfig, 
+                          keyword_weight: roundedVal,
+                          semantic_weight: complementVal
+                        })
+                      }}
+                      className="w-full p-2 border rounded"
+                      min="0"
+                      max="1"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-xs text-gray-500">权重总和: {(searchConfig.semantic_weight + searchConfig.keyword_weight).toFixed(2)}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 执行检索按钮 */}
+          <div>
             <Button 
               onClick={handleSearch} 
               disabled={!searchQuery.trim() || !kbId || loading}
+              className="w-full"
             >
-              {loading ? "检索中..." : "执行混合检索"}
-            </Button>
-            <Button 
-              onClick={handleQdrantHybridSearch} 
-              disabled={!searchQuery.trim() || !kbId || loading}
-              variant="outline"
-            >
-              {loading ? "检索中..." : "Qdrant混合检索"}
+              {loading ? "检索中..." : `执行${searchConfig.retrieval_mode === "semantic" ? "语义向量" : searchConfig.retrieval_mode === "keyword" ? "关键词" : "混合"}检索`}
             </Button>
           </div>
 

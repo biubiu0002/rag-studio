@@ -218,7 +218,7 @@ class RetrievalService:
         self,
         kb_id: str,
         query: str,
-        query_tokens: List[str],
+        query_tokens: Optional[List[str]] = None,
         top_k: int = 10,
         score_threshold: float = 0.0
     ) -> List[RetrievalResult]:
@@ -235,7 +235,17 @@ class RetrievalService:
         Returns:
             检索结果列表
         """
-        # 1. 获取知识库信息
+        # 1. 如果没有提供查询分词，自动生成
+        if query_tokens is None:
+            try:
+                from app.services.tokenizer_service import get_tokenizer_service
+                tokenizer = get_tokenizer_service()
+                query_tokens = tokenizer.tokenize(query, mode="search")
+            except Exception as e:
+                logger.error(f"查询分词失败: {e}")
+                query_tokens = []
+        
+        # 2. 获取知识库信息
         kb = await self.kb_service.get_knowledge_base(kb_id)
         if not kb:
             logger.warning(f"知识库不存在: {kb_id}")
@@ -459,12 +469,14 @@ class RetrievalService:
         self,
         kb_id: str,
         query: str,
-        query_vector: List[float],
-        query_tokens: List[str],
+        query_vector: Optional[List[float]] = None,
+        query_tokens: Optional[List[str]] = None,
         top_k: int = 10,
+        score_threshold: float = 0.0,
         vector_weight: float = 0.7,
         keyword_weight: float = 0.3,
-        rrf_k: int = 60
+        rrf_k: int = 60,
+        fusion: str = "rrf"
     ) -> List[RetrievalResult]:
         """
         混合检索（向量 + 关键词 + RRF融合）
@@ -525,15 +537,104 @@ class RetrievalService:
             top_k=top_k * 2
         )
         
-        # 6. RRF融合
-        fused_results = RRFFusion.fusion(
-            results_lists=[vector_results, keyword_results],
-            k=rrf_k,
-            weights=[vector_weight, keyword_weight]
-        )
+        # 6. 应用融合方法
+        if not vector_results and not keyword_results:
+            return []
         
-        # 7. 返回top_k
-        return fused_results[:top_k]
+        if fusion == "weighted":
+            # 使用加权平均融合
+            return self._weighted_fusion(
+                vector_results=vector_results,
+                keyword_results=keyword_results,
+                top_k=top_k,
+                vector_weight=vector_weight,
+                keyword_weight=keyword_weight
+            )
+        else:
+            # 使用RRF融合（默认）
+            if not vector_results:
+                return keyword_results[:top_k]
+            if not keyword_results:
+                return vector_results[:top_k]
+            
+            fused_results = RRFFusion.fusion(
+                results_lists=[vector_results, keyword_results],
+                k=rrf_k,
+                weights=[vector_weight, keyword_weight]
+            )
+            
+            return fused_results[:top_k]
+    
+    def _weighted_fusion(
+        self,
+        vector_results: List[RetrievalResult],
+        keyword_results: List[RetrievalResult],
+        top_k: int,
+        vector_weight: float = 0.7,
+        keyword_weight: float = 0.3
+    ) -> List[RetrievalResult]:
+        """
+        加权平均融合
+        
+        Args:
+            vector_results: 向量检索结果
+            keyword_results: 关键词检索结果
+            top_k: 返回数量
+            vector_weight: 向量检索权重
+            keyword_weight: 关键词检索权重
+            
+        Returns:
+            融合后的检索结果
+        """
+        # 基于 chunk_id 合并结果
+        doc_scores = {}
+        doc_info = {}
+        
+        # 处理向量检索结果
+        for result in vector_results:
+            chunk_id = result.chunk_id
+            # 对原始分数进行一次化(不同重量下的最大分数可能不同)
+            normalized_score = min(result.score, 1.0)  # 确保分数不超出1
+            doc_scores[chunk_id] = vector_weight * normalized_score
+            doc_info[chunk_id] = result
+        
+        # 处理关键词检索结果并合并分数
+        for result in keyword_results:
+            chunk_id = result.chunk_id
+            normalized_score = min(result.score, 1.0)
+            if chunk_id in doc_scores:
+                # 已有向量分数，添加关键词分数
+                doc_scores[chunk_id] += keyword_weight * normalized_score
+            else:
+                # 只有关键词分数
+                doc_scores[chunk_id] = keyword_weight * normalized_score
+                doc_info[chunk_id] = result
+        
+        # 按有权分数排序
+        sorted_docs = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
+        
+        # 构建最终结果
+        final_results = []
+        for rank, (chunk_id, score) in enumerate(sorted_docs[:top_k], start=1):
+            result = doc_info[chunk_id]
+            fused_result = RetrievalResult(
+                doc_id=result.doc_id,
+                chunk_id=result.chunk_id,
+                content=result.content,
+                score=score,
+                rank=rank,
+                source="hybrid",
+                metadata={
+                    **result.metadata,
+                    "fusion_method": "weighted_average",
+                    "vector_weight": vector_weight,
+                    "keyword_weight": keyword_weight
+                }
+            )
+            final_results.append(fused_result)
+        
+        logger.info(f"加权平均融合完成: {len(final_results)} 个结果")
+        return final_results
     
     async def advanced_hybrid_search(
         self,

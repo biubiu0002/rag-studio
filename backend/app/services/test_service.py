@@ -17,10 +17,12 @@ from app.schemas.test import (
 )
 from app.repositories.factory import RepositoryFactory
 from app.core.exceptions import NotFoundException
+from app.core.singleton import singleton
 
 logger = logging.getLogger(__name__)
 
 
+@singleton
 class TestService:
     """测试服务"""
     

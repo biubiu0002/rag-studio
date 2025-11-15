@@ -30,6 +30,27 @@ async def lifespan(app: FastAPI):
         os.makedirs(settings.STORAGE_PATH, exist_ok=True)
         print(f"📁 JSON存储路径: {settings.STORAGE_PATH}")
     
+    # 初始化模型
+    print(f"\n🤖 初始化 AI 模型...")
+    try:
+        # 初始化 BM25 模型
+        import os
+        from app.services.sparse_vector_service import SparseVectorServiceFactory
+        
+        bm25_model_path = os.path.join(settings.MODELS_PATH, settings.BM25_MODEL_NAME)
+        if os.path.exists(bm25_model_path):
+            try:
+                _ = SparseVectorServiceFactory.create('bm25', model_path=bm25_model_path)
+                print(f"✅ BM25 模型初始化成功")
+            except Exception as e:
+                print(f"⚠️  BM25 模型初始化失败: {str(e)}")
+                print(f"   应用仍可继续运行，但不能使用 BM25 功能")
+        else:
+            print(f"⚠️  BM25 模型文件不存在: {bm25_model_path}")
+            print(f"   请运行脚本下载模型")
+    except Exception as e:
+        print(f"⚠️  模型初始化出错: {str(e)}")
+    
     yield
     
     # 关闭时执行
