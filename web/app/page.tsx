@@ -11,12 +11,10 @@ import DocumentTokenizationView from "@/components/views/document-tokenization"
 import IndexWritingView from "@/components/views/index-writing"
 import RetrievalView from "@/components/views/retrieval"
 import GenerationTestView from "@/components/views/generation-test"
-import RetrieverEvaluationView from "@/components/views/retriever-evaluation"
 import TestSetManagementView from "@/components/views/test-set-management"
 import TestCaseManagementView from "@/components/views/test-case-management"
 import RetrieverTestCaseManagementView from "@/components/views/retriever-test-case-management"
 import GenerationTestCaseManagementView from "@/components/views/generation-test-case-management"
-import GeneratorEvaluationView from "@/components/views/generator-evaluation"
 import EvaluationHistoryView from "@/components/views/evaluation-history"
 import EvaluationTasksView from "@/components/views/evaluation-tasks"
 import Dashboard from "@/components/views/dashboard"
@@ -95,10 +93,6 @@ export default function Home() {
         return <GenerationTestCaseManagementView />
       case "test-case-management":
         return <TestCaseManagementView />
-      case "retriever-evaluation":
-        return <RetrieverEvaluationView />
-      case "generator-evaluation":
-        return <GeneratorEvaluationView />
       case "evaluation-history":
         return <EvaluationHistoryView />
       case "evaluation-tasks":

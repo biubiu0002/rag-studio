@@ -617,6 +617,104 @@ class RetrievalService:
         logger.info(f"Qdrant原生混合检索完成: {len(results)} 个结果")
         return results
     
+    async def unified_search(
+        self,
+        kb_id: str,
+        query: str,
+        retrieval_mode: str = "hybrid",  # "semantic" | "keyword" | "hybrid"
+        top_k: int = 10,
+        score_threshold: float = 0.0,
+        fusion_method: str = "rrf",  # "rrf" | "weighted"
+        semantic_weight: float = 0.7,
+        keyword_weight: float = 0.3,
+        rrf_k: int = 60
+    ) -> List[RetrievalResult]:
+        """
+        统一检索接口，支持三种检索模式
+        
+        Args:
+            kb_id: 知识库ID
+            query: 查询文本
+            retrieval_mode: 检索模式 ("semantic" | "keyword" | "hybrid")
+            top_k: 返回数量
+            score_threshold: 分数阈值
+            fusion_method: 融合方法 ("rrf" | "weighted")，仅在 hybrid 模式有效
+            semantic_weight: 语义向量权重，仅在 hybrid 模式有效
+            keyword_weight: 关键词权重，仅在 hybrid 模式有效
+            rrf_k: RRF融合参数k，仅在 hybrid 模式有效
+            
+        Returns:
+            检索结果列表
+        """
+        if retrieval_mode == "semantic":
+            # 语义向量检索：需要先生成 embedding
+            kb = await self.kb_service.get_knowledge_base(kb_id)
+            if not kb:
+                logger.warning(f"知识库不存在: {kb_id}")
+                return []
+            
+            from app.services.embedding_service import EmbeddingServiceFactory
+            from app.models.knowledge_base import EmbeddingProvider
+            
+            try:
+                # 转换provider字符串为枚举
+                if isinstance(kb.embedding_provider, str):
+                    provider = EmbeddingProvider(kb.embedding_provider)
+                else:
+                    provider = kb.embedding_provider
+                
+                # 创建嵌入服务实例并生成向量
+                embedding_service = EmbeddingServiceFactory.create(
+                    provider=provider,
+                    model_name=kb.embedding_model
+                )
+                query_vector = await embedding_service.embed_text(query)
+                
+                # 调用向量检索
+                return await self.vector_search(
+                    kb_id=kb_id,
+                    query=query,
+                    query_vector=query_vector,
+                    top_k=top_k,
+                    score_threshold=score_threshold
+                )
+            except Exception as e:
+                logger.error(f"语义向量检索失败: {e}", exc_info=True)
+                return []
+        
+        elif retrieval_mode == "keyword":
+            # 关键词检索
+            return await self.keyword_search(
+                kb_id=kb_id,
+                query=query,
+                query_sparse_vector=None,  # 自动生成
+                top_k=top_k,
+                score_threshold=score_threshold
+            )
+        
+        elif retrieval_mode == "hybrid":
+            # 混合检索：根据 fusion_method 选择融合策略
+            # fusion_method "rrf" -> fusion "rrf"
+            # fusion_method "weighted" -> fusion "dbsf" (Qdrant的加权融合)
+            fusion_strategy = "rrf" if fusion_method == "rrf" else "dbsf"
+            
+            return await self.hybrid_search(
+                kb_id=kb_id,
+                query=query,
+                query_vector=None,  # 自动生成
+                query_sparse_vector=None,  # 自动生成
+                top_k=top_k,
+                score_threshold=score_threshold,
+                fusion=fusion_strategy,
+                semantic_weight=semantic_weight,
+                keyword_weight=keyword_weight,
+                rrf_k=rrf_k
+            )
+        
+        else:
+            logger.error(f"不支持的检索模式: {retrieval_mode}")
+            return []
+
 
 class BM25:
     """BM25算法实现"""

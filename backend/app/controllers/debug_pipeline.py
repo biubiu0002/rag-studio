@@ -632,77 +632,27 @@ async def unified_search(request: UnifiedSearchRequest):
     """
     try:
         from app.services.knowledge_base import KnowledgeBaseService
-        from app.services.vector_db_service import VectorDBServiceFactory
-        from app.models.knowledge_base import VectorDBType
         from app.services.retrieval_service import RetrievalService
         
-        
-        # 获取知识库配置
+        # 获取知识库配置（用于返回元数据）
         kb_service = KnowledgeBaseService()
         kb = await kb_service.get_knowledge_base(request.kb_id)
         if not kb:
             raise HTTPException(status_code=404, detail=f"知识库不存在: {request.kb_id}")
+        
+        # 使用统一检索服务
         retrieval_service = RetrievalService()
-        # 获取知识库绑定的embedding服务和分词服务配置
-        embedding_service = EmbeddingServiceFactory.create(
-            provider=kb.embedding_provider,
-            model_name=kb.embedding_model
+        results = await retrieval_service.unified_search(
+            kb_id=request.kb_id,
+            query=request.query,
+            retrieval_mode=request.retrieval_mode,
+            top_k=request.top_k,
+            score_threshold=request.score_threshold,
+            fusion_method=request.fusion_method,
+            semantic_weight=request.semantic_weight,
+            keyword_weight=request.keyword_weight,
+            rrf_k=request.rrf_k
         )
-        
-        # 获取向量数据库服务
-        vector_db_service = VectorDBServiceFactory.create(
-            VectorDBType(kb.vector_db_type),
-            config=kb.vector_db_config if kb.vector_db_config else None
-        )
-        
-        results = []
-        
-        if request.retrieval_mode == "semantic":
-            # 纯语义向量检索
-            query_vector = await embedding_service.embed_text(request.query)
-            search_results = await vector_db_service.search(
-                collection_name=request.kb_id,
-                query_vector=query_vector,
-                top_k=request.top_k,
-                score_threshold=request.score_threshold
-            )
-            
-            # 转换结果格式
-            from app.services.retrieval_service import RetrievalResult
-            for idx, result in enumerate(search_results):
-                results.append(RetrievalResult(
-                    doc_id=result.get("id", ""),
-                    chunk_id=result.get("payload", {}).get("chunk_id", ""),
-                    content=result.get("payload", {}).get("content", ""),
-                    score=result.get("score", 0.0),
-                    rank=idx + 1,
-                    source="semantic",
-                    metadata=result.get("payload", {})
-                ))
-        
-        elif request.retrieval_mode == "keyword":
-            # 关键词检索（基于稀疏向量）
-            results = await retrieval_service.keyword_search(
-                kb_id=request.kb_id,
-                query=request.query,
-                top_k=request.top_k,
-                score_threshold=request.score_threshold
-            )
-        
-        elif request.retrieval_mode == "hybrid":
-            # 根据融合方法选择Qdrant的融合策略
-            fusion_strategy = "rrf" if request.fusion_method == "rrf" else "dbsf"
-            results_data = await retrieval_service.hybrid_search(
-                kb_id=request.kb_id,
-                query=request.query,
-                top_k=request.top_k,
-                score_threshold=request.score_threshold,
-                semantic_weight=request.semantic_weight,
-                keyword_weight=request.keyword_weight,
-                rrf_k=request.rrf_k,
-                fusion=fusion_strategy
-            )
-            results = results_data
         
         # 转换为字典
         results_data = [r.to_dict() for r in results]

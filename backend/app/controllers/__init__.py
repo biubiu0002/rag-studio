@@ -3,13 +3,12 @@
 处理HTTP请求和响应
 """
 
-from app.controllers import knowledge_base, document, test_management, pipeline, retriever_evaluation, debug_pipeline
+from app.controllers import knowledge_base, document, test_management, pipeline, debug_pipeline
 
 __all__ = [
     "knowledge_base",
     "document",
     "test_management",
     "pipeline",
-    "retriever_evaluation",
     "debug_pipeline",
 ]

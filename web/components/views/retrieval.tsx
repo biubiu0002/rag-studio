@@ -7,6 +7,7 @@ import { debugAPI } from "@/lib/api"
 import { knowledgeBaseAPI } from "@/lib/api"
 import { showToast } from "@/lib/toast"
 import { saveResultToStorage, listResultsByType, loadResultFromStorage, exportResultToFile, importResultFromFile, SavedResult } from "@/lib/storage"
+import RetrievalConfigComponent, { defaultRetrievalConfig, RetrievalConfig } from "@/components/ui/retrieval-config"
 
 export default function RetrievalView() {
   const [loading, setLoading] = useState(false)
@@ -14,14 +15,9 @@ export default function RetrievalView() {
   const [knowledgeBases, setKnowledgeBases] = useState<any[]>([])
   const [searchQuery, setSearchQuery] = useState<string>("")
   const [searchResults, setSearchResults] = useState<any>(null)
-  const [searchConfig, setSearchConfig] = useState({
-    retrieval_mode: "hybrid" as "semantic" | "keyword" | "hybrid",
-    top_k: 5,
-    score_threshold: 0.0,
-    fusion_method: "rrf" as "rrf" | "weighted",
-    rrf_k: 60,
-    semantic_weight: 0.7,
-    keyword_weight: 0.3
+  const [searchConfig, setSearchConfig] = useState<RetrievalConfig>({
+    ...defaultRetrievalConfig,
+    top_k: 5
   })
   const [savedResults, setSavedResults] = useState<SavedResult[]>([])
   const [selectedResultId, setSelectedResultId] = useState<string>("")
@@ -270,179 +266,7 @@ export default function RetrievalView() {
           <CardDescription>选择检索模式并设置相关参数</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* 检索模式选择 */}
-          <div>
-            <label className="block text-sm font-medium mb-2">检索模式</label>
-            <div className="grid grid-cols-3 gap-3">
-              <button
-                onClick={() => setSearchConfig({ ...searchConfig, retrieval_mode: "semantic" })}
-                className={`p-3 border rounded text-center transition-colors ${
-                  searchConfig.retrieval_mode === "semantic"
-                    ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-gray-300 hover:border-blue-300"
-                }`}
-              >
-                <div className="font-medium">语义向量检索</div>
-                <div className="text-xs text-gray-500 mt-1">基于稠密向量的语义相似度</div>
-              </button>
-              <button
-                onClick={() => setSearchConfig({ ...searchConfig, retrieval_mode: "keyword" })}
-                className={`p-3 border rounded text-center transition-colors ${
-                  searchConfig.retrieval_mode === "keyword"
-                    ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-gray-300 hover:border-blue-300"
-                }`}
-              >
-                <div className="font-medium">关键词检索</div>
-                <div className="text-xs text-gray-500 mt-1">基于稀疏向量的关键词匹配</div>
-              </button>
-              <button
-                onClick={() => setSearchConfig({ ...searchConfig, retrieval_mode: "hybrid" })}
-                className={`p-3 border rounded text-center transition-colors ${
-                  searchConfig.retrieval_mode === "hybrid"
-                    ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-gray-300 hover:border-blue-300"
-                }`}
-              >
-                <div className="font-medium">混合检索</div>
-                <div className="text-xs text-gray-500 mt-1">语义+关键词融合</div>
-              </button>
-            </div>
-          </div>
-
-          {/* 基础参数 */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-2">返回结果数 (top_k)</label>
-              <input
-                type="number"
-                value={searchConfig.top_k}
-                onChange={(e) => setSearchConfig({ ...searchConfig, top_k: parseInt(e.target.value) || 5 })}
-                className="w-full p-2 border rounded"
-                min="1"
-                max="50"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">分数阈值 (score_threshold)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={searchConfig.score_threshold}
-                onChange={(e) => {
-                  const value = e.target.value === '' ? 0.0 : parseFloat(e.target.value);
-                  setSearchConfig({ ...searchConfig, score_threshold: isNaN(value) ? 0.0 : value });
-                }}
-                className="w-full p-2 border rounded"
-                min="0"
-                max="1"
-              />
-              <p className="text-xs text-gray-500 mt-1">只返回分数大于等于此阈值的结果 (0.0-1.0)</p>
-            </div>
-          </div>
-
-          {/* 混合检索专用参数 */}
-          {searchConfig.retrieval_mode === "hybrid" && (
-            <div className="border-t pt-4 space-y-4">
-              <h3 className="text-sm font-medium">混合检索融合策略</h3>
-              
-              {/* 融合方法选择 */}
-              <div>
-                <label className="block text-sm font-medium mb-2">融合方法</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => setSearchConfig({ ...searchConfig, fusion_method: "rrf" })}
-                    className={`p-2 border rounded text-center transition-colors ${
-                      searchConfig.fusion_method === "rrf"
-                        ? "border-blue-500 bg-blue-50 text-blue-700"
-                        : "border-gray-300 hover:border-blue-300"
-                    }`}
-                  >
-                    <div className="font-medium">RRF融合</div>
-                    <div className="text-xs text-gray-500 mt-1">基于排名的倒数融合</div>
-                  </button>
-                  <button
-                    onClick={() => setSearchConfig({ ...searchConfig, fusion_method: "weighted" })}
-                    className={`p-2 border rounded text-center transition-colors ${
-                      searchConfig.fusion_method === "weighted"
-                        ? "border-blue-500 bg-blue-50 text-blue-700"
-                        : "border-gray-300 hover:border-blue-300"
-                    }`}
-                  >
-                    <div className="font-medium">加权平均</div>
-                    <div className="text-xs text-gray-500 mt-1">基于分数的加权融合</div>
-                  </button>
-                </div>
-              </div>
-
-              {/* RRF参数 */}
-              {searchConfig.fusion_method === "rrf" && (
-                <div>
-                  <label className="block text-sm font-medium mb-2">RRF参数 (k)</label>
-                  <input
-                    type="number"
-                    value={searchConfig.rrf_k}
-                    onChange={(e) => setSearchConfig({ ...searchConfig, rrf_k: parseInt(e.target.value) || 60 })}
-                    className="w-full p-2 border rounded"
-                    min="1"
-                    max="100"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">RRF公式: 1/(k + rank)，k值越大，排名差异的影响越小</p>
-                </div>
-              )}
-
-              {/* 加权平均参数 */}
-              {searchConfig.fusion_method === "weighted" && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-2">语义向量权重</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={searchConfig.semantic_weight}
-                      onChange={(e) => {
-                        const val = e.target.value === '' ? 0.7 : parseFloat(e.target.value)
-                        const roundedVal = Math.round(val * 100) / 100
-                        const complementVal = Math.round((1 - roundedVal) * 100) / 100
-                        setSearchConfig({ 
-                          ...searchConfig, 
-                          semantic_weight: roundedVal,
-                          keyword_weight: complementVal
-                        })
-                      }}
-                      className="w-full p-2 border rounded"
-                      min="0"
-                      max="1"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-2">关键词权重</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={searchConfig.keyword_weight}
-                      onChange={(e) => {
-                        const val = e.target.value === '' ? 0.3 : parseFloat(e.target.value)
-                        const roundedVal = Math.round(val * 100) / 100
-                        const complementVal = Math.round((1 - roundedVal) * 100) / 100
-                        setSearchConfig({ 
-                          ...searchConfig, 
-                          keyword_weight: roundedVal,
-                          semantic_weight: complementVal
-                        })
-                      }}
-                      className="w-full p-2 border rounded"
-                      min="0"
-                      max="1"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <p className="text-xs text-gray-500">权重总和: {(searchConfig.semantic_weight + searchConfig.keyword_weight).toFixed(2)}</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          <RetrievalConfigComponent value={searchConfig} onChange={setSearchConfig} />
 
           {/* 执行检索按钮 */}
           <div>

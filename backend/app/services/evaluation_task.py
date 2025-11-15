@@ -227,17 +227,18 @@ class EvaluationTaskService:
             try:
                 # 执行检索
                 retrieval_config = task.retrieval_config
-                top_k = retrieval_config.get("top_k", 10)
                 
-                # 使用知识库的检索服务
-                results = await retrieval_service.hybrid_search(
+                # 使用统一检索服务，支持多种检索模式
+                results = await retrieval_service.unified_search(
                     kb_id=task.kb_id,
                     query=test_case.question,
-                    query_vector=None,  # 自动生成
-                    query_sparse_vector=None,  # 自动生成
-                    top_k=top_k,
+                    retrieval_mode=retrieval_config.get("retrieval_mode", "hybrid"),
+                    top_k=retrieval_config.get("top_k", 10),
                     score_threshold=retrieval_config.get("score_threshold", 0.0),
-                    fusion=retrieval_config.get("fusion", "rrf")
+                    fusion_method=retrieval_config.get("fusion_method", "rrf"),
+                    semantic_weight=retrieval_config.get("semantic_weight", 0.7),
+                    keyword_weight=retrieval_config.get("keyword_weight", 0.3),
+                    rrf_k=retrieval_config.get("rrf_k", 60)
                 )
                 
                 # 提取检索结果
@@ -267,6 +268,7 @@ class EvaluationTaskService:
                 # 计算评估指标
                 # 基础指标：优先使用chunk_id匹配，如果没有则使用external_id匹配
                 from app.services.retriever_evaluation import RetrieverEvaluator
+                top_k = retrieval_config.get("top_k", 10)
                 evaluator = RetrieverEvaluator(top_k=top_k)
                 
                 if expected_chunk_ids:

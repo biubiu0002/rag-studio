@@ -23,6 +23,7 @@ import { Progress } from "@/components/ui/progress"
 import { evaluationAPI, knowledgeBaseAPI, testAPI, EvaluationTask, KnowledgeBase, TestSet, EvaluationSummary, EvaluationCaseResult } from "@/lib/api"
 import { showToast } from "@/lib/toast"
 import { Plus, Eye, Archive, Loader2, CheckCircle2, XCircle, Clock } from "lucide-react"
+import RetrievalConfigComponent, { defaultRetrievalConfig, RetrievalConfig } from "@/components/ui/retrieval-config"
 
 type ViewMode = "list" | "create" | "detail"
 type CreateStep = "config" | "cases"
@@ -47,14 +48,7 @@ export default function EvaluationTasksView() {
   const [selectedTestSetForCreate, setSelectedTestSetForCreate] = useState<string>("")
   const [evaluationType, setEvaluationType] = useState<"retrieval" | "generation">("retrieval")
   const [taskName, setTaskName] = useState("")
-  const [retrievalConfig, setRetrievalConfig] = useState({
-    top_k: 10,
-    score_threshold: 0.7,
-    fusion: "rrf",
-    rrf_k: 60,
-    vector_weight: 0.7,
-    keyword_weight: 0.3,
-  })
+  const [retrievalConfig, setRetrievalConfig] = useState<RetrievalConfig>(defaultRetrievalConfig)
   const [testSetsForKb, setTestSetsForKb] = useState<TestSet[]>([])
   
   // 评估结果相关状态
@@ -372,25 +366,7 @@ export default function EvaluationTasksView() {
             {evaluationType === "retrieval" && (
               <div className="space-y-4 pt-4 border-t">
                 <h3 className="font-medium">检索配置</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Top K</label>
-                    <Input
-                      type="number"
-                      value={retrievalConfig.top_k}
-                      onChange={(e) => setRetrievalConfig({ ...retrievalConfig, top_k: parseInt(e.target.value) || 10 })}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-2">分数阈值</label>
-                    <Input
-                      type="number"
-                      step="0.1"
-                      value={retrievalConfig.score_threshold}
-                      onChange={(e) => setRetrievalConfig({ ...retrievalConfig, score_threshold: parseFloat(e.target.value) || 0.7 })}
-                    />
-                  </div>
-                </div>
+                <RetrievalConfigComponent value={retrievalConfig} onChange={setRetrievalConfig} />
               </div>
             )}
 

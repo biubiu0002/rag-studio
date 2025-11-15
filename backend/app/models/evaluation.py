@@ -35,7 +35,10 @@ class EvaluationTask(BaseModelMixin):
     status: EvaluationStatus = Field(default=EvaluationStatus.PENDING, description="任务状态")
     
     # 配置信息
-    retrieval_config: Dict[str, Any] = Field(default_factory=dict, description="检索配置")
+    retrieval_config: Dict[str, Any] = Field(
+        default_factory=dict, 
+        description="检索配置，包含 retrieval_mode, top_k, score_threshold, fusion_method, rrf_k, semantic_weight, keyword_weight"
+    )
     generation_config: Dict[str, Any] = Field(default_factory=dict, description="生成配置")
     
     # 统计信息
@@ -57,9 +60,13 @@ class EvaluationTask(BaseModelMixin):
                 "task_name": "检索器评估-2025-01-15",
                 "status": "completed",
                 "retrieval_config": {
+                    "retrieval_mode": "hybrid",
                     "top_k": 10,
-                    "score_threshold": 0.7,
-                    "fusion": "rrf"
+                    "score_threshold": 0.0,
+                    "fusion_method": "rrf",
+                    "rrf_k": 60,
+                    "semantic_weight": 0.7,
+                    "keyword_weight": 0.3
                 },
                 "total_cases": 100,
                 "completed_cases": 98,
