@@ -19,10 +19,8 @@ from app.core.exceptions import NotFoundException
 from app.services.document import DocumentService
 from app.services.knowledge_base import KnowledgeBaseService
 from app.services.document_processor import DocumentProcessor
-from app.services.embedding_service import EmbeddingServiceFactory
-from app.services.vector_db_service import VectorDBServiceFactory
+from app.services.rag_service import RAGService
 from app.models.document import DocumentChunk, DocumentStatus
-from app.models.knowledge_base import VectorDBType, EmbeddingProvider
 
 logger = logging.getLogger(__name__)
 
@@ -434,177 +432,35 @@ class TestSetImportService:
             await chunk_repo.create(doc_chunk)
             document_chunks.append(doc_chunk)
         
-        # 3. 生成向量嵌入
-        embedding_service = EmbeddingServiceFactory.create(
-            provider=EmbeddingProvider(kb.embedding_provider),
-            model_name=kb.embedding_model
-        )
-        
+        # 3. 准备chunk文本和元数据
         chunk_contents = [chunk.content for chunk in chunks]
-        embeddings = await embedding_service.embed_texts(chunk_contents)
-        
-        # 4. 更新chunk的embedding
-        for i, doc_chunk in enumerate(document_chunks):
-            if i < len(embeddings):
-                doc_chunk.embedding = embeddings[i]
-                doc_chunk.embedding_model = kb.embedding_model
-                await chunk_repo.update(doc_chunk.id, doc_chunk)
-        
-        # 5. 生成稀疏向量（如果schema配置了稀疏向量字段）
-        sparse_vectors = []
-        sparse_vector_method = None
-        
-        # 检查schema中是否配置了稀疏向量字段
-        has_sparse_vector_field = False
-        if kb_schema:
-            for field in kb_schema.get("fields", []):
-                if field.get("type") == "sparse_vector":
-                    has_sparse_vector_field = True
-                    # 从字段配置中获取生成方法，默认为 bm25
-                    sparse_vector_method = field.get("method", "bm25")
-                    break
-        
-        # 如果配置了稀疏向量字段，生成稀疏向量
-        if has_sparse_vector_field and sparse_vector_method:
-            try:
-                from app.services.sparse_vector_service import SparseVectorServiceFactory, convert_sparse_vector_to_qdrant_format
-                
-                # 创建稀疏向量服务
-                sparse_service = SparseVectorServiceFactory.create(sparse_vector_method)
-                
-                # 为所有chunk文本添加到语料库（用于计算IDF等统计信息）
-                sparse_service.add_documents(chunk_contents)
-                
-                # 为每个chunk生成稀疏向量
-                for chunk_content in chunk_contents:
-                    sparse_vector_dict = sparse_service.generate_sparse_vector(chunk_content)
-                    # 转换为Qdrant格式 (indices, values)
-                    indices, values = convert_sparse_vector_to_qdrant_format(sparse_vector_dict)
-                    sparse_vectors.append({
-                        "indices": indices,
-                        "values": values
-                    })
-                
-                logger.info(f"为文档 {document.id} 生成了 {len(sparse_vectors)} 个稀疏向量")
-            except Exception as e:
-                logger.warning(f"生成稀疏向量失败: {e}，将跳过稀疏向量")
-                sparse_vectors = []
-        
-        # 6. 写入向量数据库
-        vector_db_service = VectorDBServiceFactory.create(
-            VectorDBType(kb.vector_db_type),
-            config=kb.vector_db_config if kb.vector_db_config else None
-        )
-        
-        # 创建集合（如果不存在）
-        vector_dimension = kb.embedding_dimension
-        if kb_schema:
-            for field in kb_schema.get("fields", []):
-                if field.get("type") == "dense_vector" and "dimension" in field:
-                    vector_dimension = field["dimension"]
-                    break
-        
-        try:
-            await vector_db_service.create_collection(
-                collection_name=kb_id,
-                dimension=vector_dimension,
-                schema_fields=kb_schema.get("fields", []) if kb_schema else []
-            )
-        except Exception as e:
-            # 如果集合已存在，忽略错误
-            if "already exists" not in str(e).lower() and "collection already exists" not in str(e).lower():
-                logger.warning(f"创建集合时发生错误: {e}")
-        
-        # 准备写入数据
-        vectors = []
-        metadatas = []
-        ids = []
-        
-        schema_fields = kb_schema.get("fields", []) if kb_schema else []
+        metadata_list = []
         
         for i, doc_chunk in enumerate(document_chunks):
-            if i < len(embeddings):
-                # 构建metadata
-                metadata: Dict[str, Any] = {
-                    "kb_id": kb_id,
-                    "document_id": document.id,
-                    "chunk_id": doc_chunk.id,
-                    "content": doc_chunk.content,
-                    "char_count": len(doc_chunk.content),
-                    "token_count": doc_chunk.token_count,
-                    "source": document.metadata.get("source", "import"),
-                    "external_id": document.external_id,
-                }
-                
-                # 添加chunk的metadata
-                if doc_chunk.metadata:
-                    metadata.update(doc_chunk.metadata)
-                
-                # 根据schema添加字段
-                for field in schema_fields:
-                    field_name = field["name"]
-                    if field.get("type") in ["dense_vector", "sparse_vector"]:
-                        continue
-                    if field_name in metadata:
-                        continue
-                    # 设置默认值
-                    field_type = field.get("type", "text")
-                    if field_type == "text":
-                        metadata[field_name] = ""
-                    elif field_type == "integer":
-                        metadata[field_name] = 0
-                    elif field_type == "float":
-                        metadata[field_name] = 0.0
-                    elif field_type == "boolean":
-                        metadata[field_name] = False
-                    elif field_type == "keyword":
-                        metadata[field_name] = ""
-                
-                metadatas.append(metadata)
-                
-                # 处理ID - Qdrant接受字符串或整数
-                # 使用chunk的ID作为向量ID
-                ids.append(doc_chunk.id)
+            metadata = {
+                "document_id": document.id,
+                "chunk_id": doc_chunk.id,
+                "content": doc_chunk.content,
+                "char_count": len(doc_chunk.content),
+                "token_count": doc_chunk.token_count,
+                "source": document.metadata.get("source", "import"),
+                "external_id": document.external_id,
+            }
+            # 添加chunk的metadata
+            if doc_chunk.metadata:
+                metadata.update(doc_chunk.metadata)
+            metadata_list.append(metadata)
         
-        # 确定向量字段名称
-        vector_field_name = "dense"
-        for field in schema_fields:
-            if field.get("type") == "dense_vector":
-                vector_field_name = field.get("name", "dense")
-                break
+        # 4. 使用RAGService写入向量索引
+        rag_service = RAGService(kb_id=kb_id)
+        write_result = await rag_service.write_index(chunk_contents, metadata_list=metadata_list)
         
-        # 确定稀疏向量字段名称
-        sparse_vector_field_name = "sparse_vector"
-        for field in schema_fields:
-            if field.get("type") == "sparse_vector":
-                sparse_vector_field_name = field.get("name", "sparse_vector")
-                break
-        
-        # 构建向量数据（包括密集向量和稀疏向量）
-        vectors_to_insert = []
-        for i, embedding in enumerate(embeddings):
-            vector_data = {vector_field_name: embedding}
-            
-            # 添加稀疏向量（如果生成了）
-            if i < len(sparse_vectors):
-                vector_data[sparse_vector_field_name] = sparse_vectors[i]
-            
-            vectors_to_insert.append(vector_data)
-        
-        # 写入向量数据库
-        await vector_db_service.insert_vectors(
-            collection_name=kb_id,
-            vectors=vectors_to_insert,
-            metadatas=metadatas,
-            ids=ids
-        )
-        
-        # 更新chunk的vector_id和is_indexed
-        for i, doc_chunk in enumerate(document_chunks):
-            if i < len(ids):
-                doc_chunk.vector_id = str(ids[i])
-                doc_chunk.is_indexed = True
-                await chunk_repo.update(doc_chunk.id, doc_chunk)
+        # 5. 更新chunk的vector_id和is_indexed
+        # IndexWritingService会使用metadata_list中的chunk_id作为向量ID
+        for doc_chunk in document_chunks:
+            doc_chunk.vector_id = doc_chunk.id
+            doc_chunk.is_indexed = True
+            await chunk_repo.update(doc_chunk.id, doc_chunk)
         
         # 更新文档状态
         document.status = DocumentStatus.COMPLETED

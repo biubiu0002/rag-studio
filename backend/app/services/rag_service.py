@@ -3,10 +3,11 @@ RAG核心服务
 整合检索和生成功能
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from app.services.embedding_service import EmbeddingServiceFactory
 from app.services.vector_db_service import VectorDBServiceFactory
+from app.services.index_writing_service import IndexWritingService
 from app.repositories.factory import RepositoryFactory
 
 
@@ -25,6 +26,7 @@ class RAGService:
         """
         self.kb_id = kb_id
         self.kb_repo = RepositoryFactory.create_knowledge_base_repository()
+        self.index_writing_service = IndexWritingService()
     
     async def retrieve(
         self,
@@ -161,4 +163,25 @@ class RAGService:
         # return response["message"]["content"]
         
         return "LLM调用待实现"
+    
+    async def write_index(
+        self,
+        texts: List[str],
+        metadata_list: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        """
+        将文本写入向量索引（业务层抽象）
+        
+        Args:
+            texts: 文本列表
+            metadata_list: 可选的元数据列表，每个元素对应一个text
+        
+        Returns:
+            写入结果字典
+        """
+        return await self.index_writing_service.write_chunks_to_index(
+            kb_id=self.kb_id,
+            chunks=texts,
+            metadata_list=metadata_list
+        )
 
