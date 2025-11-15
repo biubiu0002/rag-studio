@@ -578,6 +578,7 @@ class RetrievalService:
             query_sparse_vector = sparse_service.convert_to_qdrant_format(sparse_vector) # pyright: ignore[reportAssignmentType]
         
         # 6. 执行Qdrant原生混合检索
+        #    Qdrant DBSF是自适应根据标准差计算分数的，权重传参不生效，不支持rrf_k参数
         try:
             search_results = await qdrant_service.hybrid_search(
                 collection_name=kb_id,
@@ -586,9 +587,6 @@ class RetrievalService:
                 top_k=top_k,
                 score_threshold=score_threshold,
                 fusion=fusion,
-                semantic_weight=semantic_weight,
-                keyword_weight=keyword_weight,
-                rrf_k=rrf_k
             )
         except Exception as e:
             logger.error(f"Qdrant混合检索失败: {e}")
