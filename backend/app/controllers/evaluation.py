@@ -275,17 +275,55 @@ async def get_evaluation_case_results(
             page_size=page_size
         )
         
-        results_data = [{
-            "id": result.id,
-            "test_case_id": result.test_case_id,
-            "query": result.query,
-            "status": result.status.value,
-            "retrieval_metrics": result.retrieval_metrics,
-            "ragas_retrieval_metrics": result.ragas_retrieval_metrics,
-            "ragas_generation_metrics": result.ragas_generation_metrics,
-            "ragas_score": result.ragas_score,
-            "error_message": result.error_message
-        } for result in results]
+        # 获取测试用例的期望答案信息
+        from app.services.test_service import RetrieverTestCaseService
+        test_case_service = RetrieverTestCaseService()
+        
+        # 获取评估任务信息，用于生成external_id
+        task = await evaluation_service.get_evaluation_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="评估任务不存在")
+        
+        results_data = []
+        for result in results:
+            # 获取测试用例的期望答案
+            expected_answers = []
+            try:
+                test_case = await test_case_service.get_test_case(result.test_case_id)
+                if test_case:
+                    # 为每个期望答案生成external_id
+                    expected_answers = []
+                    for idx, answer in enumerate(test_case.expected_answers):
+                        answer_dict = {
+                            "answer_text": answer.get("answer_text", ""),
+                            "chunk_id": answer.get("chunk_id"),
+                            "relevance_score": answer.get("relevance_score", 0),
+                            # 生成external_id: test_set_{test_set_id}_case_{case_id}_answer_{answer_index}
+                            "external_id": f"test_set_{task.test_set_id}_case_{result.test_case_id}_answer_{idx}"
+                        }
+                        expected_answers.append(answer_dict)
+                    
+            except Exception as e:
+                logger.warning(f"获取测试用例期望答案失败 {result.test_case_id}: {e}", exc_info=True)
+            
+            results_data.append({
+                "id": result.id,
+                "evaluation_task_id": result.evaluation_task_id,
+                "test_case_id": result.test_case_id,
+                "query": result.query,
+                "retrieved_chunks": result.retrieved_chunks,
+                "retrieval_time": result.retrieval_time,
+                "generated_answer": result.generated_answer,
+                "generation_time": result.generation_time,
+                "status": result.status.value,
+                "retrieval_metrics": result.retrieval_metrics,
+                "ragas_retrieval_metrics": result.ragas_retrieval_metrics,
+                "ragas_generation_metrics": result.ragas_generation_metrics,
+                "ragas_score": result.ragas_score,
+                "error_message": result.error_message,
+                "expected_answers": expected_answers,
+                "created_at": result.created_at.isoformat() if result.created_at else None
+            })
         
         return JSONResponse(
             content=page_response(

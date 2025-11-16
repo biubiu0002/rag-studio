@@ -354,10 +354,35 @@ class RetrieverTestCaseService:
         filters = {"test_set_id": test_set_id}
         skip = (page - 1) * page_size
         
-        cases = await self.test_case_repo.get_all(skip=skip, limit=page_size, filters=filters)
+        # 先获取所有用例，然后按metadata中的order字段排序
+        # 注意：由于JSON字段排序在数据库层面比较复杂，这里先获取所有数据再排序
+        # 如果数据量很大，可以考虑在数据库层面优化
+        all_cases = await self.test_case_repo.get_all(skip=0, limit=10000, filters=filters)
         total = await self.test_case_repo.count(filters=filters)
         
-        return cases, total
+        # 按metadata中的order字段排序
+        def get_order(case: RetrieverTestCase) -> int:
+            if case.metadata and "order" in case.metadata:
+                return case.metadata.get("order", 999999)
+            # 如果没有order字段，使用created_at的时间戳作为排序依据
+            if hasattr(case, 'created_at') and case.created_at:
+                from datetime import datetime
+                if isinstance(case.created_at, str):
+                    try:
+                        dt = datetime.fromisoformat(case.created_at.replace('Z', '+00:00'))
+                        return int(dt.timestamp())
+                    except:
+                        return 999999
+                elif hasattr(case.created_at, 'timestamp'):
+                    return int(case.created_at.timestamp())
+            return 999999
+        
+        sorted_cases = sorted(all_cases, key=get_order)
+        
+        # 分页
+        paginated_cases = sorted_cases[skip:skip + page_size]
+        
+        return paginated_cases, total
     
     async def update_test_case(
         self,

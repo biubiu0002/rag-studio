@@ -19,12 +19,13 @@ class BaseEmbeddingService(ABC):
     """嵌入服务抽象基类"""
     
     @abstractmethod
-    async def embed_text(self, text: str) -> List[float]:
+    async def embed_text(self, text: str, max_chars: int = 8192) -> List[float]:
         """
         嵌入单个文本
         
         Args:
             text: 输入文本
+            max_chars: 最大字符长度，超过此长度的文本将被截断（默认8192）
         
         Returns:
             向量嵌入
@@ -32,12 +33,13 @@ class BaseEmbeddingService(ABC):
         pass
     
     @abstractmethod
-    async def embed_texts(self, texts: List[str]) -> List[List[float]]:
+    async def embed_texts(self, texts: List[str], max_chars: int = 8192) -> List[List[float]]:
         """
         批量嵌入文本
         
         Args:
             texts: 文本列表
+            max_chars: 最大字符长度，超过此长度的文本将被截断（默认8192）
         
         Returns:
             向量嵌入列表
@@ -134,12 +136,13 @@ class OllamaEmbeddingService(BaseEmbeddingService):
             logger.error(f"Ollama API调用失败: {str(e)}", exc_info=True)
             raise
     
-    async def embed_text(self, text: str) -> List[float]:
+    async def embed_text(self, text: str, max_chars: int = 8192) -> List[float]:
         """
         嵌入单个文本
         
         Args:
             text: 输入文本
+            max_chars: 最大字符长度，超过此长度的文本将被截断（默认8192）
         
         Returns:
             向量嵌入
@@ -147,9 +150,17 @@ class OllamaEmbeddingService(BaseEmbeddingService):
         if not text or not text.strip():
             raise ValueError("输入文本不能为空")
         
+        # 截断超长文本
+        if len(text) > max_chars:
+            logger.warning(
+                f"文本长度 {len(text)} 超过限制 {max_chars}，"
+                f"将截断到前 {max_chars} 个字符"
+            )
+            text = text[:max_chars]
+        
         return await self._call_ollama_api(text)
     
-    async def embed_texts(self, texts: List[str]) -> List[List[float]]:
+    async def embed_texts(self, texts: List[str], max_chars: int = 8192) -> List[List[float]]:
         """
         批量嵌入文本
         
@@ -157,6 +168,7 @@ class OllamaEmbeddingService(BaseEmbeddingService):
         
         Args:
             texts: 文本列表
+            max_chars: 最大字符长度，超过此长度的文本将被截断（默认8192）
         
         Returns:
             向量嵌入列表
@@ -164,10 +176,21 @@ class OllamaEmbeddingService(BaseEmbeddingService):
         if not texts:
             return []
         
-        # 验证输入
+        # 验证输入并截断超长文本
+        processed_texts = []
         for i, text in enumerate(texts):
             if not text or not text.strip():
                 raise ValueError(f"第 {i+1} 个文本不能为空")
+            
+            # 截断超长文本
+            if len(text) > max_chars:
+                logger.warning(
+                    f"第 {i+1} 个文本长度 {len(text)} 超过限制 {max_chars}，"
+                    f"将截断到前 {max_chars} 个字符"
+                )
+                text = text[:max_chars]
+            
+            processed_texts.append(text)
         
         # 使用信号量限制并发数（避免过多并发请求导致Ollama过载）
         semaphore = asyncio.Semaphore(10)  # 最多10个并发请求
@@ -177,7 +200,7 @@ class OllamaEmbeddingService(BaseEmbeddingService):
                 return await self._call_ollama_api(text)
         
         # 并发执行所有请求
-        tasks = [embed_with_semaphore(text) for text in texts]
+        tasks = [embed_with_semaphore(text) for text in processed_texts]
         embeddings = await asyncio.gather(*tasks)
         
         return list(embeddings)
@@ -198,8 +221,16 @@ class CustomEmbeddingService(BaseEmbeddingService):
         self.api_key = api_key
         self.model_name = model_name
     
-    async def embed_text(self, text: str) -> List[float]:
+    async def embed_text(self, text: str, max_chars: int = 8192) -> List[float]:
         """嵌入单个文本（待实现）"""
+        # 截断超长文本
+        if len(text) > max_chars:
+            logger.warning(
+                f"文本长度 {len(text)} 超过限制 {max_chars}，"
+                f"将截断到前 {max_chars} 个字符"
+            )
+            text = text[:max_chars]
+        
         # TODO: 调用自研服务API
         # import httpx
         # async with httpx.AsyncClient() as client:
@@ -212,11 +243,27 @@ class CustomEmbeddingService(BaseEmbeddingService):
         
         return [0.0] * 768
     
-    async def embed_texts(self, texts: List[str]) -> List[List[float]]:
+    async def embed_texts(self, texts: List[str], max_chars: int = 8192) -> List[List[float]]:
         """批量嵌入文本（待实现）"""
+        # 验证输入并截断超长文本
+        processed_texts = []
+        for i, text in enumerate(texts):
+            if not text or not text.strip():
+                raise ValueError(f"第 {i+1} 个文本不能为空")
+            
+            # 截断超长文本
+            if len(text) > max_chars:
+                logger.warning(
+                    f"第 {i+1} 个文本长度 {len(text)} 超过限制 {max_chars}，"
+                    f"将截断到前 {max_chars} 个字符"
+                )
+                text = text[:max_chars]
+            
+            processed_texts.append(text)
+        
         embeddings = []
-        for text in texts:
-            embedding = await self.embed_text(text)
+        for text in processed_texts:
+            embedding = await self.embed_text(text, max_chars=max_chars)
             embeddings.append(embedding)
         return embeddings
 

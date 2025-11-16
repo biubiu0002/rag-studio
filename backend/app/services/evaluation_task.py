@@ -245,19 +245,25 @@ class EvaluationTaskService:
                 retrieved_chunks = [r.to_dict() for r in results]
                 retrieved_contexts_list = [r.content for r in results]
                 
-                # 从expected_answers中提取期望的chunk_ids或external_ids
+                # 从expected_answers中提取期望的chunk_ids或external_ids，以及关联度分数
                 expected_chunk_ids = set()
                 expected_external_ids = set()
                 ground_truth_contexts_list = []
+                relevance_scores = {}  # doc_id -> relevance_score
                 
                 for idx, answer in enumerate(test_case.expected_answers):
+                    relevance_score = answer.get("relevance_score", 1.0)  # 默认1.0
+                    
                     if answer.get("chunk_id"):
-                        expected_chunk_ids.add(answer["chunk_id"])
+                        chunk_id = answer["chunk_id"]
+                        expected_chunk_ids.add(chunk_id)
+                        relevance_scores[chunk_id] = relevance_score
                     elif answer.get("answer_text"):
                         # 如果没有chunk_id，通过external_id匹配
                         # external_id格式: test_set_{test_set_id}_case_{case_id}_answer_{answer_index}
                         external_id = f"test_set_{test_set.id}_case_{test_case.id}_answer_{idx}"
                         expected_external_ids.add(external_id)
+                        relevance_scores[external_id] = relevance_score
                     if answer.get("answer_text"):
                         ground_truth_contexts_list.append(answer["answer_text"])
                 
@@ -275,7 +281,9 @@ class EvaluationTaskService:
                     # 使用chunk_id匹配
                     retrieved_chunk_ids = [r.chunk_id for r in results]
                     basic_metrics = evaluator.evaluate_single_query(
-                        retrieved_chunk_ids, list(expected_chunk_ids)
+                        retrieved_chunk_ids, 
+                        list(expected_chunk_ids),
+                        relevance_scores=relevance_scores if relevance_scores else None
                     )
                 elif expected_external_ids:
                     # 使用external_id匹配
@@ -288,7 +296,9 @@ class EvaluationTaskService:
                                 retrieved_external_ids.append(external_id)
                     
                     basic_metrics = evaluator.evaluate_single_query(
-                        retrieved_external_ids, list(expected_external_ids)
+                        retrieved_external_ids, 
+                        list(expected_external_ids),
+                        relevance_scores=relevance_scores if relevance_scores else None
                     )
                 else:
                     # 既没有chunk_id也没有answer_text，无法评估

@@ -190,7 +190,15 @@ class TestSetImportService:
                         doc.content = content
                         doc.metadata = answer.get("metadata", {})
                         await doc_repo.update(doc.id, doc)
-                        imported_count += 1
+                        
+                        # 删除旧的chunks并重新处理文档
+                        try:
+                            await self._delete_document_chunks(doc.id)
+                            await self._process_imported_document(doc, import_task.kb_id)
+                            imported_count += 1
+                        except Exception as e:
+                            logger.error(f"处理文档失败 {doc.id}: {e}", exc_info=True)
+                            failed_count += 1
                     elif not existing_docs:
                         # 创建新文档
                         documents_dict = {external_id: content}
@@ -208,7 +216,7 @@ class TestSetImportService:
                                 doc.metadata = answer.get("metadata", {})
                             await doc_repo.update(doc.id, doc)
                             
-                            # 处理文档：分块、嵌入、写入向量库
+                            # 处理文档：不分块，直接写入向量库
                             try:
                                 await self._process_imported_document(doc, import_task.kb_id)
                                 imported_count += 1
@@ -386,9 +394,50 @@ class TestSetImportService:
         
         return result, total
     
+    async def _delete_document_chunks(self, document_id: str):
+        """
+        删除文档的所有chunks和对应的向量
+        
+        Args:
+            document_id: 文档ID
+        """
+        chunk_repo = RepositoryFactory.create_document_chunk_repository()
+        filters = {"document_id": document_id}
+        chunks = await chunk_repo.get_all(skip=0, limit=10000, filters=filters)
+        
+        if not chunks:
+            return
+        
+        # 获取知识库ID（从第一个chunk获取）
+        kb_id = chunks[0].kb_id
+        
+        # 收集所有vector_id
+        vector_ids = []
+        for chunk in chunks:
+            if chunk.vector_id:
+                vector_ids.append(chunk.vector_id)
+        
+        # 从向量库中删除向量
+        if vector_ids:
+            try:
+                kb = await self.kb_service.get_knowledge_base(kb_id)
+                if kb:
+                    from app.services.vector_db_service import VectorDBServiceFactory
+                    vector_db = VectorDBServiceFactory.create(kb.vector_db_type)
+                    await vector_db.delete_vectors(kb_id, vector_ids)
+                    logger.info(f"已从向量库删除 {len(vector_ids)} 个向量")
+            except Exception as e:
+                logger.warning(f"从向量库删除向量失败: {e}", exc_info=True)
+        
+        # 删除chunk记录
+        for chunk in chunks:
+            await chunk_repo.delete(chunk.id)
+        
+        logger.info(f"已删除文档 {document_id} 的 {len(chunks)} 个chunks")
+    
     async def _process_imported_document(self, document, kb_id: str):
         """
-        处理导入的文档：分块、嵌入、写入向量库
+        处理导入的文档：不分块，直接写入向量库（测试集导入场景）
         
         Args:
             document: 文档对象
@@ -402,80 +451,59 @@ class TestSetImportService:
         # 获取schema配置
         kb_schema = await self.kb_service.get_knowledge_base_schema(kb_id)
         
-        # 1. 分块文档
+        # 1. 获取文档内容（不分块）
         content = document.content or ""
         if not content:
             logger.warning(f"文档 {document.id} 内容为空，跳过处理")
             return
         
-        chunks = DocumentProcessor.chunk_document(
-            text=content,
-            method="fixed_size",
-            chunk_size=kb.chunk_size or 500,
-            chunk_overlap=kb.chunk_overlap or 50
+        # 2. 创建单个DocumentChunk记录（代表整个文档）
+        chunk_repo = RepositoryFactory.create_document_chunk_repository()
+        chunk_id = f"chunk_{uuid.uuid4().hex[:12]}"
+        token_count = DocumentProcessor.estimate_tokens(content)
+        
+        doc_chunk = DocumentChunk(
+            id=chunk_id,
+            document_id=document.id,
+            kb_id=kb_id,
+            chunk_index=0,  # 测试集导入场景只有一个chunk，索引为0
+            content=content,
+            start_pos=0,
+            end_pos=len(content),
+            token_count=token_count,
+            metadata={}
         )
         
-        if not chunks:
-            logger.warning(f"文档 {document.id} 分块后为空，跳过处理")
-            return
+        await chunk_repo.create(doc_chunk)
         
-        # 2. 创建DocumentChunk记录
-        chunk_repo = RepositoryFactory.create_document_chunk_repository()
-        document_chunks = []
+        # 3. 准备元数据（单个文档作为一个向量）
+        metadata = {
+            "document_id": document.id,
+            "chunk_id": doc_chunk.id,
+            "content": content,
+            "char_count": len(content),
+            "token_count": token_count,
+            "source": document.metadata.get("source", "import"),
+            "external_id": document.external_id,
+        }
+        # 添加文档的metadata
+        if document.metadata:
+            metadata.update(document.metadata)
         
-        for chunk in chunks:
-            chunk_id = f"chunk_{uuid.uuid4().hex[:12]}"
-            token_count = DocumentProcessor.estimate_tokens(chunk.content)
-            
-            doc_chunk = DocumentChunk(
-                id=chunk_id,
-                document_id=document.id,
-                kb_id=kb_id,
-                chunk_index=chunk.index,
-                content=chunk.content,
-                start_pos=chunk.start_pos,
-                end_pos=chunk.end_pos,
-                token_count=token_count,
-                metadata=chunk.metadata or {}
-            )
-            
-            await chunk_repo.create(doc_chunk)
-            document_chunks.append(doc_chunk)
-        
-        # 3. 准备chunk文本和元数据
-        chunk_contents = [chunk.content for chunk in chunks]
-        metadata_list = []
-        
-        for i, doc_chunk in enumerate(document_chunks):
-            metadata = {
-                "document_id": document.id,
-                "chunk_id": doc_chunk.id,
-                "content": doc_chunk.content,
-                "char_count": len(doc_chunk.content),
-                "token_count": doc_chunk.token_count,
-                "source": document.metadata.get("source", "import"),
-                "external_id": document.external_id,
-            }
-            # 添加chunk的metadata
-            if doc_chunk.metadata:
-                metadata.update(doc_chunk.metadata)
-            metadata_list.append(metadata)
-        
-        # 4. 使用RAGService写入向量索引
+        # 4. 使用RAGService写入向量索引（整个文档作为一个向量）
         rag_service = RAGService(kb_id=kb_id)
-        write_result = await rag_service.write_index(chunk_contents, metadata_list=metadata_list)
+        write_result = await rag_service.write_index([content], metadata_list=[metadata])
         
         # 5. 更新chunk的vector_id和is_indexed
-        # IndexWritingService会使用metadata_list中的chunk_id作为向量ID
-        for doc_chunk in document_chunks:
-            doc_chunk.vector_id = doc_chunk.id
-            doc_chunk.is_indexed = True
-            await chunk_repo.update(doc_chunk.id, doc_chunk)
+        doc_chunk.vector_id = doc_chunk.id
+        doc_chunk.is_indexed = True
+        await chunk_repo.update(doc_chunk.id, doc_chunk)
         
         # 更新文档状态
         document.status = DocumentStatus.COMPLETED
+        document.chunk_count = 1  # 测试集导入场景只有一个chunk
         doc_repo = RepositoryFactory.create_document_repository()
         await doc_repo.update(document.id, document)
         
-        logger.info(f"文档 {document.id} 处理完成: {len(chunks)} 个分块已写入向量库")
+        logger.info(f"文档 {document.id} 处理完成: 整个文档已写入向量库（不分块）")
 

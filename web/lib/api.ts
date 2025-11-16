@@ -684,6 +684,12 @@ export interface EvaluationSummary {
   updated_at: string
 }
 
+export interface ExpectedAnswer {
+  answer_text: string
+  chunk_id?: string
+  relevance_score: number
+}
+
 export interface EvaluationCaseResult {
   id: string
   evaluation_task_id: string
@@ -699,6 +705,7 @@ export interface EvaluationCaseResult {
   ragas_score?: number
   status: 'pending' | 'completed' | 'failed'
   error_message?: string
+  expected_answers?: ExpectedAnswer[]
   created_at: string
 }
 

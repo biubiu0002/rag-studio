@@ -38,7 +38,8 @@ class RetrieverEvaluator:
     def evaluate_single_query(
         self,
         retrieved_doc_ids: List[str],
-        relevant_doc_ids: List[str]
+        relevant_doc_ids: List[str],
+        relevance_scores: Optional[Dict[str, float]] = None
     ) -> Dict[str, float]:
         """
         评估单个查询的检索结果
@@ -46,6 +47,8 @@ class RetrieverEvaluator:
         Args:
             retrieved_doc_ids: 检索返回的文档ID列表（按相关性排序）
             relevant_doc_ids: 真实相关的文档ID列表
+            relevance_scores: 可选的关联度分数字典，key为文档ID，value为关联度分数（0.0-1.0）
+                            如果提供，NDCG等指标将使用这些分数；否则使用二值判断
         
         Returns:
             评估指标字典
@@ -59,7 +62,7 @@ class RetrieverEvaluator:
         f1_score = self._calculate_f1(precision, recall)
         mrr = self._calculate_mrr(retrieved_doc_ids, relevant_doc_ids)
         map_score = self._calculate_map(retrieved_doc_ids, relevant_doc_ids)
-        ndcg = self._calculate_ndcg(retrieved_doc_ids, relevant_doc_ids)
+        ndcg = self._calculate_ndcg(retrieved_doc_ids, relevant_doc_ids, relevance_scores)
         hit_rate = self._calculate_hit_rate(retrieved_doc_ids, relevant_doc_ids)
         
         return {
@@ -81,9 +84,10 @@ class RetrieverEvaluator:
         
         Args:
             results: 检索结果列表，每个包含:
-                - query_id: 查询ID
+                - query_id: 查询ID（可选）
                 - retrieved_doc_ids: 检索到的文档ID列表
                 - relevant_doc_ids: 真实相关文档ID列表
+                - relevance_scores: 可选的关联度分数字典（可选）
         
         Returns:
             平均评估指标
@@ -93,9 +97,11 @@ class RetrieverEvaluator:
         
         metrics_list = []
         for result in results:
+            relevance_scores = result.get('relevance_scores')
             metrics = self.evaluate_single_query(
                 result['retrieved_doc_ids'],
-                result['relevant_doc_ids']
+                result['relevant_doc_ids'],
+                relevance_scores=relevance_scores
             )
             metrics_list.append(metrics)
         
@@ -199,6 +205,7 @@ class RetrieverEvaluator:
         self,
         retrieved: List[str],
         relevant: List[str],
+        relevance_scores: Optional[Dict[str, float]] = None,
         k: Optional[int] = None
     ) -> float:
         """
@@ -207,24 +214,47 @@ class RetrieverEvaluator:
         Args:
             retrieved: 检索结果列表
             relevant: 相关文档列表
+            relevance_scores: 可选的关联度分数字典，key为文档ID，value为关联度分数
+                            如果提供，使用实际分数；否则使用二值判断（相关=1.0，不相关=0.0）
             k: 考虑的位置数，默认为retrieved长度
         """
         if k is None:
             k = len(retrieved)
         
-        relevant_set = set(relevant)
-        
-        # 计算DCG
+        # 计算DCG（实际排序的折扣累积增益）
         dcg = 0.0
         for i, doc_id in enumerate(retrieved[:k], start=1):
-            if doc_id in relevant_set:
-                # rel = 1 if relevant, 0 otherwise
-                dcg += 1.0 / np.log2(i + 1)
+            if relevance_scores is not None:
+                # 使用关联度分数
+                rel_score = relevance_scores.get(doc_id, 0.0)
+            else:
+                # 使用二值判断
+                rel_score = 1.0 if doc_id in relevant else 0.0
+            
+            if rel_score > 0:
+                dcg += rel_score / np.log2(i + 1)
         
         # 计算IDCG（理想情况下的DCG）
-        idcg = 0.0
-        for i in range(1, min(len(relevant), k) + 1):
-            idcg += 1.0 / np.log2(i + 1)
+        # 理想情况：按关联度分数从高到低排序
+        if relevance_scores is not None:
+            # 使用关联度分数计算IDCG
+            ideal_relevance_scores = []
+            for doc_id in relevant:
+                rel_score = relevance_scores.get(doc_id, 0.0)
+                # 只考虑关联度大于0的文档
+                if rel_score > 0:
+                    ideal_relevance_scores.append(rel_score)
+            # 按分数从高到低排序
+            ideal_relevance_scores.sort(reverse=True)
+            # 计算IDCG
+            idcg = 0.0
+            for i, rel_score in enumerate(ideal_relevance_scores[:k], start=1):
+                idcg += rel_score / np.log2(i + 1)
+        else:
+            # 使用二值判断计算IDCG
+            idcg = 0.0
+            for i in range(1, min(len(relevant), k) + 1):
+                idcg += 1.0 / np.log2(i + 1)
         
         if idcg == 0:
             return 0.0
