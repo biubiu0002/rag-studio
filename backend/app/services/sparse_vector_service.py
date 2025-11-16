@@ -112,6 +112,47 @@ class BM25SparseVectorService(BaseSparseVectorService):
         }
 
 
+def get_bm25_model_path() -> str:
+    """
+    获取BM25模型路径
+    
+    优先从配置中获取，如果未配置则使用默认路径
+    
+    Returns:
+        BM25模型文件的完整路径
+    
+    Raises:
+        ValueError: 如果模型路径不存在
+    """
+    from app.config import settings
+    import os
+    
+    # 1. 尝试从配置获取
+    model_path = getattr(settings, 'BM25_MODEL_PATH', None)
+    if model_path and os.path.exists(model_path):
+        return model_path
+    
+    # 2. 使用默认路径
+    default_path = os.path.join(settings.MODELS_PATH, settings.BM25_MODEL_NAME)
+    if os.path.exists(default_path):
+        return default_path
+    
+    # 3. 尝试使用项目根目录的相对路径（向后兼容）
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    fallback_path = os.path.join(project_root, "resources", "models", settings.BM25_MODEL_NAME)
+    if os.path.exists(fallback_path):
+        return fallback_path
+    
+    # 4. 所有路径都不存在，抛出错误
+    raise ValueError(
+        f"BM25模型文件不存在。已尝试以下路径：\n"
+        f"  1. 配置路径: {model_path if model_path else '(未配置)'}\n"
+        f"  2. 默认路径: {default_path}\n"
+        f"  3. 回退路径: {fallback_path}\n"
+        f"请确保模型文件存在或配置正确的 BM25_MODEL_PATH"
+    )
+
+
 class SparseVectorServiceFactory:
     """稀疏向量服务工厂"""
     
@@ -142,8 +183,12 @@ class SparseVectorServiceFactory:
             # BM25 使用单例模式，避免重复加载模型
             if SparseVectorServiceFactory._bm25_instance is None:
                 model_path = kwargs.get('model_path')
+                # 如果未提供model_path，尝试自动获取
                 if not model_path:
-                    raise ValueError("创建 BM25 服务时必须提供 model_path 参数")
+                    try:
+                        model_path = get_bm25_model_path()
+                    except ValueError as e:
+                        raise ValueError(f"创建 BM25 服务失败: {e}")
                 SparseVectorServiceFactory._bm25_instance = BM25SparseVectorService(model_path)
             return SparseVectorServiceFactory._bm25_instance
         

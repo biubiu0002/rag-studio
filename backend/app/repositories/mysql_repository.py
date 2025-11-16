@@ -44,7 +44,8 @@ class MySQLRepository(BaseRepository[T], Generic[T]):
             TestSetORM, TestCaseORM, EvaluationTaskORM,
             EvaluationCaseResultORM, EvaluationSummaryORM,
             RetrieverTestCaseORM, GenerationTestCaseORM,
-            RetrieverEvaluationResultORM, GenerationEvaluationResultORM
+            RetrieverEvaluationResultORM, GenerationEvaluationResultORM,
+            TaskQueueORM
         )
         
         model_map = {
@@ -57,6 +58,7 @@ class MySQLRepository(BaseRepository[T], Generic[T]):
             "generation_test_cases": GenerationTestCaseORM,
             "retriever_evaluation_results": RetrieverEvaluationResultORM,
             "generation_evaluation_results": GenerationEvaluationResultORM,
+            "task_queue": TaskQueueORM,
         }
         
         if self.table_name not in model_map:

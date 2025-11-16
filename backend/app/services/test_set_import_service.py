@@ -132,8 +132,18 @@ class TestSetImportService:
         )
         await self.import_task_repo.create(import_task)
         
-        # 异步执行导入任务
-        asyncio.create_task(self._execute_import_task(import_task_id, request.update_existing))
+        # 创建任务队列任务，由task_executor异步执行
+        from app.services.task_queue_service import TaskQueueService
+        from app.models.task_queue import TaskType
+        
+        task_service = TaskQueueService()
+        await task_service.create_task(
+            task_type=TaskType.TEST_SET_IMPORT,
+            payload={
+                "import_task_id": import_task_id,
+                "update_existing": request.update_existing
+            }
+        )
         
         return import_task
     

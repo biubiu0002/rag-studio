@@ -142,4 +142,10 @@ class RepositoryFactory:
         """创建导入任务仓储"""
         from app.models.test import ImportTask
         return RepositoryFactory.create(ImportTask, "import_tasks")
+    
+    @staticmethod
+    def create_task_queue_repository():
+        """创建任务队列仓储"""
+        from app.models.task_queue import TaskQueue
+        return RepositoryFactory.create(TaskQueue, "task_queue")
 

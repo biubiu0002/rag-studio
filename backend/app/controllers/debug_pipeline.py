@@ -468,22 +468,30 @@ async def write_hybrid_index(request: WriteHybridIndexRequest):
             
             metadata_list.append(metadata)
         
-        # 使用IndexWritingService写入
-        from app.services.index_writing_service import IndexWritingService
-        index_writing_service = IndexWritingService()
+        # 创建文档写入任务
+        from app.services.task_queue_service import TaskQueueService
+        from app.models.task_queue import TaskType
         
-        write_result = await index_writing_service.write_chunks_to_index(
-            kb_id=request.kb_id,
-            chunks=chunks_text,
-            metadata_list=metadata_list,
-            dense_vectors=request.dense_vectors,
-            sparse_vectors=request.sparse_vectors
+        task_service = TaskQueueService()
+        task = await task_service.create_task(
+            task_type=TaskType.DOCUMENT_WRITE,
+            payload={
+                "kb_id": request.kb_id,
+                "chunks": chunks_text,
+                "metadata_list": metadata_list,
+                "dense_vectors": request.dense_vectors,
+                "sparse_vectors": request.sparse_vectors
+            }
         )
         
         return JSONResponse(
             content=success_response(
-                data=write_result,
-                message=f"成功写入 {write_result['written_count']} 个混合向量"
+                data={
+                    "task_id": task.id,
+                    "status": task.status.value,
+                    "task_type": task.task_type.value
+                },
+                message="文档写入任务已创建，正在后台处理"
             )
         )
         

@@ -21,6 +21,19 @@ class EvaluationStatusEnum(str, enum.Enum):
     ARCHIVED = "archived"
 
 
+class TaskTypeEnum(str, enum.Enum):
+    DOCUMENT_WRITE = "document_write"
+    EVALUATION = "evaluation"
+    TEST_SET_IMPORT = "test_set_import"
+
+
+class TaskStatusEnum(str, enum.Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class TestSetORM(Base):
     """测试集ORM模型"""
     __tablename__ = "test_sets"
@@ -267,4 +280,29 @@ class EvaluationSummaryORM(Base):
     
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class TaskQueueORM(Base):
+    """任务队列ORM模型"""
+    __tablename__ = "task_queue"
+    
+    id = Column(String(50), primary_key=True)
+    task_type = Column(SQLEnum(TaskTypeEnum), nullable=False, index=True)
+    status = Column(SQLEnum(TaskStatusEnum), nullable=False, default="pending", index=True)
+    payload = Column(JSON, nullable=False)
+    progress = Column(Float, default=0.0, nullable=False)
+    result = Column(JSON, nullable=True)
+    error_message = Column(Text, nullable=True)
+    retry_count = Column(Integer, default=0, nullable=False)
+    max_retries = Column(Integer, default=3, nullable=False)
+    
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        Index('idx_task_queue_status', 'status'),
+        Index('idx_task_queue_type', 'task_type'),
+    )
 

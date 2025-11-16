@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     MILVUS_USER: str = Field(default="", description="Milvus用户")
     MILVUS_PASSWORD: str = Field(default="", description="Milvus密码")
     
+    # 任务执行器配置
+    TASK_EXECUTOR_URL: str = Field(default="http://localhost:8001", description="任务执行器服务地址")
+    TASK_NOTIFIER_TYPE: str = Field(default="http", description="任务通知器类型: http 或 mq")
+    TASK_EXECUTOR_MAX_CONCURRENT: int = Field(default=5, description="任务执行器最大并发数")
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

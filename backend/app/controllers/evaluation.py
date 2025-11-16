@@ -91,39 +91,49 @@ async def execute_evaluation_task(
     """
     执行评估任务
     
-    注意：这是一个长时间运行的任务，建议使用异步任务队列
+    创建异步任务，由task_executor后台执行
     """
     try:
+        # 验证评估任务是否存在
         evaluation_service = EvaluationTaskService()
+        evaluation_task = await evaluation_service.get_evaluation_task(task_id)
+        if not evaluation_task:
+            raise HTTPException(status_code=404, detail="评估任务不存在")
         
         save_detailed = True
         if request:
             save_detailed = request.save_detailed_results
         
-        # 执行评估（这里会阻塞，实际应该使用后台任务）
-        task = await evaluation_service.execute_evaluation_task(
-            task_id=task_id,
-            save_detailed_results=save_detailed
+        # 创建任务队列任务
+        from app.services.task_queue_service import TaskQueueService
+        from app.models.task_queue import TaskType
+        
+        task_service = TaskQueueService()
+        task = await task_service.create_task(
+            task_type=TaskType.EVALUATION,
+            payload={
+                "evaluation_task_id": task_id,
+                "save_detailed_results": save_detailed
+            }
         )
         
         return JSONResponse(
             content=success_response(
                 data={
-                    "id": task.id,
+                    "task_id": task.id,
+                    "evaluation_task_id": task_id,
                     "status": task.status.value,
-                    "total_cases": task.total_cases,
-                    "completed_cases": task.completed_cases,
-                    "failed_cases": task.failed_cases,
-                    "started_at": task.started_at.isoformat() if task.started_at else None,
-                    "completed_at": task.completed_at.isoformat() if task.completed_at else None
+                    "task_type": task.task_type.value
                 },
-                message="评估任务执行完成"
+                message="评估任务已创建，正在后台执行"
             )
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"执行评估任务失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"执行失败: {str(e)}")
+        logger.error(f"创建评估任务失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"创建失败: {str(e)}")
 
 
 @router.get("/tasks", response_model=None, summary="获取评估任务列表")

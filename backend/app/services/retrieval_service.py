@@ -247,7 +247,17 @@ class RetrievalService:
         # 2. 如果没有提供稀疏向量，生成稀疏向量
         if query_sparse_vector is None:
             sparse_method = kb.vector_db_config.get("sparse_method", "bm25") if kb.vector_db_config else "bm25"
-            sparse_service = SparseVectorServiceFactory.create(sparse_method)
+            
+            # 获取BM25模型路径（如果需要）
+            model_path = None
+            if sparse_method == "bm25":
+                from app.services.sparse_vector_service import get_bm25_model_path
+                model_path = get_bm25_model_path()
+            
+            sparse_service = SparseVectorServiceFactory.create(
+                sparse_method,
+                model_path=model_path if sparse_method == "bm25" else None
+            )
             query_sparse_dict = sparse_service.generate_query_sparse_vector(query)
             converted_sparse = sparse_service.convert_to_qdrant_format(query_sparse_dict)
             # 确保是字典类型
@@ -569,10 +579,18 @@ class RetrievalService:
         # 5. 如果没有提供稀疏向量，但知识库配置了稀疏向量字段，则尝试生成稀疏向量
         if query_sparse_vector is None:
             # 生成BM25稀疏向量
-            from app.services.sparse_vector_service import SparseVectorServiceFactory
+            from app.services.sparse_vector_service import SparseVectorServiceFactory, get_bm25_model_path
+            
             # todo service_type从kb配置来 目前仅支持bm25
             service_type = "bm25"
-            sparse_service = SparseVectorServiceFactory.create(service_type="bm25")
+            
+            # 获取BM25模型路径
+            model_path = get_bm25_model_path()
+            
+            sparse_service = SparseVectorServiceFactory.create(
+                service_type="bm25",
+                model_path=model_path
+            )
             
             sparse_vector = sparse_service.generate_query_sparse_vector(query=query)
             query_sparse_vector = sparse_service.convert_to_qdrant_format(sparse_vector) # pyright: ignore[reportAssignmentType]

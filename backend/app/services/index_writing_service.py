@@ -144,19 +144,12 @@ class IndexWritingService:
         if has_sparse_vector_field and sparse_vector_method:
             try:
                 # 创建稀疏向量服务
-                # BM25需要model_path参数
-                model_path = getattr(settings, 'BM25_MODEL_PATH', None)
-                if not model_path:
-                    # 尝试使用默认路径
-                    import os
-                    default_path = os.path.join(
-                        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                        "resources", "models", "bm25_zh_default.json"
-                    )
-                    if os.path.exists(default_path):
-                        model_path = default_path
-                    else:
-                        raise ValueError("BM25模型路径未配置且默认路径不存在")
+                # BM25需要model_path参数，使用通用函数获取
+                from app.services.sparse_vector_service import get_bm25_model_path
+                
+                model_path = None
+                if sparse_vector_method == "bm25":
+                    model_path = get_bm25_model_path()
                 
                 sparse_service = SparseVectorServiceFactory.create(
                     sparse_vector_method,
