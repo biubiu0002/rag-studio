@@ -13,7 +13,7 @@ from app.models.evaluation import (
     EvaluationTask, EvaluationCaseResult, EvaluationSummary,
     EvaluationType, EvaluationStatus
 )
-from app.models.test import TestSet, TestCase, TestType, RetrieverTestCase, GenerationTestCase
+from app.models.test import TestSet, TestType, RetrieverTestCase, GenerationTestCase
 from app.repositories.factory import RepositoryFactory
 from app.services.ragas_evaluation import RAGASEvaluationService
 from app.services.retrieval_service import RetrievalService

@@ -650,82 +650,6 @@ export const testAPI = {
     }>(`/tests/knowledge-bases/${kbId}/test-sets?${params}`)
   },
 
-  /**
-   * 创建测试用例
-   */
-  createTestCase: async (data: {
-    test_set_id: string
-    query: string
-    expected_chunks?: string[]
-    expected_answer?: string
-    metadata?: Record<string, any>
-  }) => {
-    return request<{ success: boolean; data: { id: string }; message: string }>(
-      '/tests/test-cases',
-      {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }
-    )
-  },
-
-  /**
-   * 获取测试用例列表
-   */
-  listTestCases: async (testSetId: string, page = 1, pageSize = 20) => {
-    const params = new URLSearchParams({
-      test_set_id: testSetId,
-      page: page.toString(),
-      page_size: pageSize.toString(),
-    })
-    
-    return request<{
-      success: boolean
-      data: TestCase[]
-      total: number
-      page: number
-      page_size: number
-    }>(`/tests/test-cases?${params}`)
-  },
-
-  /**
-   * 获取测试用例详情
-   */
-  getTestCase: async (id: string) => {
-    return request<{ success: boolean; data: TestCase }>(
-      `/tests/test-cases/${id}`
-    )
-  },
-
-  /**
-   * 更新测试用例
-   */
-  updateTestCase: async (id: string, data: {
-    query?: string
-    expected_chunks?: string[]
-    expected_answer?: string
-    metadata?: Record<string, any>
-  }) => {
-    return request<{ success: boolean; message: string }>(
-      `/tests/test-cases/${id}`,
-      {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      }
-    )
-  },
-
-  /**
-   * 删除测试用例
-   */
-  deleteTestCase: async (id: string) => {
-    return request<{ success: boolean; message: string }>(
-      `/tests/test-cases/${id}`,
-      {
-        method: 'DELETE',
-      }
-    )
-  },
 }
 
 // ========== 评估任务相关API ==========
@@ -975,51 +899,6 @@ export const debugAPI = {
   },
 
   /**
-   * 写入向量索引
-   */
-  writeVectorIndex: async (data: {
-    kb_id: string
-    chunks: any[]
-    vectors: number[][]
-    fields?: string[] // 添加fields参数
-  }) => {
-    return request<{ success: boolean; data: any }>('/debug/index/vector/write', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
-  },
-
-  /**
-   * 写入关键词索引
-   */
-  writeKeywordIndex: async (data: {
-    kb_id: string
-    chunks: any[]
-    tokens_list: string[][]
-    fields?: string[] // 添加fields参数
-  }) => {
-    return request<{ success: boolean; data: any }>('/debug/index/keyword/write', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
-  },
-
-  /**
-   * 写入稀疏向量索引
-   */
-  writeSparseVectorIndex: async (data: {
-    kb_id: string
-    chunks: any[]
-    sparse_vectors: any[]
-    fields?: string[] // 添加fields参数
-  }) => {
-    return request<{ success: boolean; data: any }>('/debug/index/sparse-vector/write', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
-  },
-
-  /**
    * 写入混合索引（稠密向量+稀疏向量一次性写入）
    */
   writeHybridIndex: async (data: {
@@ -1056,25 +935,6 @@ export const debugAPI = {
   },
 
   /**
-   * 混合检索
-   */
-  hybridSearch: async (data: {
-    kb_id: string
-    query: string
-    top_k?: number
-    vector_weight?: number
-    keyword_weight?: number
-    rrf_k?: number
-    embedding_model?: string
-    tokenize_mode?: string
-  }) => {
-    return request<{ success: boolean; data: any }>('/debug/retrieve/hybrid', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
-  },
-
-  /**
    * Qdrant混合检索
    */
   qdrantHybridSearch: async (data: {
@@ -1103,20 +963,6 @@ export const debugAPI = {
     method?: "bm25" | "tf-idf" | "simple" | "splade"
   }) => {
     return request<{ success: boolean; data: any }>('/debug/sparse-vector/generate', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
-  },
-
-  /**
-   * 测试RRF融合
-   */
-  testRRF: async (data: {
-    results_lists: any[][]
-    k?: number
-    weights?: number[]
-  }) => {
-    return request<{ success: boolean; data: any }>('/debug/test/rrf', {
       method: 'POST',
       body: JSON.stringify(data),
     })

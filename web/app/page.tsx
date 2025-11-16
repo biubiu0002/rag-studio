@@ -12,9 +12,6 @@ import IndexWritingView from "@/components/views/index-writing"
 import RetrievalView from "@/components/views/retrieval"
 import GenerationTestView from "@/components/views/generation-test"
 import TestSetManagementView from "@/components/views/test-set-management"
-import TestCaseManagementView from "@/components/views/test-case-management"
-import RetrieverTestCaseManagementView from "@/components/views/retriever-test-case-management"
-import GenerationTestCaseManagementView from "@/components/views/generation-test-case-management"
 import EvaluationHistoryView from "@/components/views/evaluation-history"
 import EvaluationTasksView from "@/components/views/evaluation-tasks"
 import Dashboard from "@/components/views/dashboard"
@@ -31,9 +28,6 @@ type ContentView =
   | "retrieval"
   | "generation-test"
   | "test-set-management"
-  | "test-case-management"
-  | "retriever-test-case-management"
-  | "generation-test-case-management"
   | "retriever-evaluation"
   | "generator-evaluation"
   | "evaluation-history"
@@ -87,12 +81,6 @@ export default function Home() {
         return <GenerationTestView />
       case "test-set-management":
         return <TestSetManagementView />
-      case "retriever-test-case-management":
-        return <RetrieverTestCaseManagementView />
-      case "generation-test-case-management":
-        return <GenerationTestCaseManagementView />
-      case "test-case-management":
-        return <TestCaseManagementView />
       case "evaluation-history":
         return <EvaluationHistoryView />
       case "evaluation-tasks":

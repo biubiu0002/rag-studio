@@ -240,33 +240,6 @@ class GenerationTestResultResponse(BaseModel):
 
 # ========== 检索器评估相关 ==========
 
-class ImportT2RankingDatasetRequest(BaseModel):
-    """导入T2Ranking数据集请求"""
-    
-    kb_id: str = Field(..., description="目标知识库ID")
-    test_set_name: str = Field(..., description="测试集名称")
-    collection_path: str = Field(..., description="文档集合文件路径")
-    queries_path: str = Field(..., description="查询文件路径")
-    qrels_path: str = Field(..., description="相关性标注文件路径")
-    max_docs: Optional[int] = Field(None, description="最大文档数量限制", ge=1)
-    max_queries: Optional[int] = Field(None, description="最大查询数量限制", ge=1)
-    description: Optional[str] = Field(None, description="测试集描述")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "kb_id": "kb_t2ranking",
-                "test_set_name": "T2Ranking检索测试集",
-                "collection_path": "/path/to/collection.tsv",
-                "queries_path": "/path/to/queries.dev.tsv",
-                "qrels_path": "/path/to/qrels.dev.tsv",
-                "max_docs": 10000,
-                "max_queries": 100,
-                "description": "T2Ranking数据集的开发集"
-            }
-        }
-
-
 class RetrieverEvaluationRequest(BaseModel):
     """检索器评估请求"""
     
