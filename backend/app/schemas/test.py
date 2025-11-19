@@ -175,69 +175,6 @@ class TestCaseResponse(BaseModel):
         from_attributes = True
 
 
-class RunRetrievalTestRequest(BaseModel):
-    """执行检索测试请求"""
-    
-    test_case_id: Optional[str] = Field(None, description="单个测试用例ID")
-    test_set_id: Optional[str] = Field(None, description="测试集ID（批量测试）")
-    top_k: int = Field(10, description="检索返回的top-k数量", ge=1, le=100)
-    score_threshold: Optional[float] = Field(None, description="相似度分数阈值")
-
-
-class RetrievalTestResultResponse(BaseModel):
-    """检索测试结果响应"""
-    
-    id: str
-    test_case_id: str
-    test_set_id: str
-    kb_id: str
-    query: str
-    retrieved_chunks: List[Dict[str, Any]]
-    retrieval_time: float
-    precision: Optional[float]
-    recall: Optional[float]
-    f1_score: Optional[float]
-    mrr: Optional[float]
-    map_score: Optional[float]
-    ndcg: Optional[float]
-    hit_rate: Optional[float]
-    status: TestStatus
-    created_at: str
-    
-    class Config:
-        from_attributes = True
-
-
-class RunGenerationTestRequest(BaseModel):
-    """执行生成测试请求"""
-    
-    test_case_id: Optional[str] = Field(None, description="单个测试用例ID")
-    test_set_id: Optional[str] = Field(None, description="测试集ID（批量测试）")
-    llm_model: Optional[str] = Field(None, description="使用的LLM模型")
-
-
-class GenerationTestResultResponse(BaseModel):
-    """生成测试结果响应"""
-    
-    id: str
-    test_case_id: str
-    test_set_id: str
-    kb_id: str
-    query: str
-    retrieved_chunks: List[Dict[str, Any]]
-    generated_answer: str
-    generation_time: float
-    relevance_score: Optional[float]
-    coherence_score: Optional[float]
-    faithfulness_score: Optional[float]
-    llm_model: Optional[str]
-    status: TestStatus
-    created_at: str
-    
-    class Config:
-        from_attributes = True
-
-
 # ========== 检索器评估相关 ==========
 
 class RetrieverEvaluationRequest(BaseModel):

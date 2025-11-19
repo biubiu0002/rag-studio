@@ -9,8 +9,7 @@ import time
 import logging
 
 from app.models.test import (
-    TestSet, RetrievalTestResult, GenerationTestResult,
-    RetrieverTestCase, GenerationTestCase,
+    TestSet, RetrieverTestCase, GenerationTestCase,
     TestType, TestStatus
 )
 from app.schemas.test import (
@@ -32,8 +31,6 @@ class TestService:
     
     def __init__(self):
         self.test_set_repo = RepositoryFactory.create_test_set_repository()
-        self.retrieval_result_repo = RepositoryFactory.create_retrieval_test_result_repository()
-        self.generation_result_repo = RepositoryFactory.create_generation_test_result_repository()
     
     # ========== 测试集管理 ==========
     
@@ -133,76 +130,6 @@ class TestService:
         
         # 删除测试集
         return await self.test_set_repo.delete(test_set_id)
-    
-    # ========== 检索测试 ==========
-    
-    async def run_retrieval_test(
-        self,
-        test_case_id: Optional[str] = None,
-        test_set_id: Optional[str] = None
-    ) -> dict:
-        """
-        执行检索测试
-        
-        TODO: 实现
-        1. 获取测试用例
-        2. 执行检索
-        3. 计算评估指标
-        4. 保存测试结果
-        """
-        # 临时返回
-        return {"message": "检索测试待实现"}
-    
-    async def list_retrieval_results(
-        self,
-        test_set_id: str,
-        page: int = 1,
-        page_size: int = 20
-    ) -> Tuple[List[RetrievalTestResult], int]:
-        """获取检索测试结果列表"""
-        filters = {"test_set_id": test_set_id}
-        skip = (page - 1) * page_size
-        
-        results = await self.retrieval_result_repo.get_all(skip=skip, limit=page_size, filters=filters)
-        total = await self.retrieval_result_repo.count(filters=filters)
-        
-        return results, total
-    
-    # ========== 生成测试 ==========
-    
-    async def run_generation_test(
-        self,
-        test_case_id: Optional[str] = None,
-        test_set_id: Optional[str] = None,
-        llm_model: Optional[str] = None
-    ) -> dict:
-        """
-        执行生成测试
-        
-        TODO: 实现
-        1. 获取测试用例
-        2. 执行检索
-        3. 调用LLM生成答案
-        4. 计算评估指标
-        5. 保存测试结果
-        """
-        # 临时返回
-        return {"message": "生成测试待实现"}
-    
-    async def list_generation_results(
-        self,
-        test_set_id: str,
-        page: int = 1,
-        page_size: int = 20
-    ) -> Tuple[List[GenerationTestResult], int]:
-        """获取生成测试结果列表"""
-        filters = {"test_set_id": test_set_id}
-        skip = (page - 1) * page_size
-        
-        results = await self.generation_result_repo.get_all(skip=skip, limit=page_size, filters=filters)
-        total = await self.generation_result_repo.count(filters=filters)
-        
-        return results, total
     
     # ========== 评估指标计算（待实现） ==========
     

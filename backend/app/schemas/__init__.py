@@ -8,6 +8,7 @@ from app.schemas.knowledge_base import (
     KnowledgeBaseCreate,
     KnowledgeBaseUpdate,
     KnowledgeBaseResponse,
+    UpdateSchemaRequest,
 )
 from app.schemas.document import (
     DocumentUploadResponse,
@@ -22,10 +23,26 @@ from app.schemas.test import (
     TestCaseCreate,
     TestCaseUpdate,
     TestCaseResponse,
-    RunRetrievalTestRequest,
-    RetrievalTestResultResponse,
-    RunGenerationTestRequest,
-    GenerationTestResultResponse,
+)
+from app.schemas.evaluation import (
+    CreateEvaluationTaskRequest,
+    ExecuteEvaluationTaskRequest,
+)
+from app.schemas.debug_pipeline import (
+    ChunkRequest,
+    TokenizeRequest,
+    EmbedRequest,
+    UnifiedSearchRequest,
+    HybridSearchRequest,
+    QdrantHybridSearchRequest,
+    SparseVectorRequest,
+    WriteVectorIndexRequest,
+    WriteKeywordIndexRequest,
+    WriteSparseVectorIndexRequest,
+    WriteHybridIndexRequest,
+    SaveDebugResultRequest,
+    GenerationRequest,
+    GenerationResponse,
 )
 
 __all__ = [
@@ -38,6 +55,7 @@ __all__ = [
     "KnowledgeBaseCreate",
     "KnowledgeBaseUpdate",
     "KnowledgeBaseResponse",
+    "UpdateSchemaRequest",
     
     # 文档
     "DocumentUploadResponse",
@@ -52,8 +70,24 @@ __all__ = [
     "TestCaseCreate",
     "TestCaseUpdate",
     "TestCaseResponse",
-    "RunRetrievalTestRequest",
-    "RetrievalTestResultResponse",
-    "RunGenerationTestRequest",
-    "GenerationTestResultResponse",
+    
+    # 评估
+    "CreateEvaluationTaskRequest",
+    "ExecuteEvaluationTaskRequest",
+    
+    # 链路调试
+    "ChunkRequest",
+    "TokenizeRequest",
+    "EmbedRequest",
+    "UnifiedSearchRequest",
+    "HybridSearchRequest",
+    "QdrantHybridSearchRequest",
+    "SparseVectorRequest",
+    "WriteVectorIndexRequest",
+    "WriteKeywordIndexRequest",
+    "WriteSparseVectorIndexRequest",
+    "WriteHybridIndexRequest",
+    "SaveDebugResultRequest",
+    "GenerationRequest",
+    "GenerationResponse",
 ]

@@ -4,7 +4,6 @@
 """
 
 from typing import List, Dict, Any, Tuple, Optional
-from dataclasses import dataclass
 from collections import defaultdict
 import logging
 import math
@@ -14,31 +13,9 @@ from app.services.knowledge_base import KnowledgeBaseService
 from app.services.vector_db_service import VectorDBServiceFactory, QdrantService
 from app.services.sparse_vector_service import SparseVectorServiceFactory
 from app.models.knowledge_base import VectorDBType
+from app.models.retrieval import RetrievalResult
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class RetrievalResult:
-    """检索结果"""
-    doc_id: str
-    chunk_id: str
-    content: str
-    score: float
-    rank: int
-    source: str  # "vector", "keyword", "hybrid"
-    metadata: Optional[Dict[str, Any]] = None
-    
-    def to_dict(self) -> dict:
-        return {
-            "doc_id": self.doc_id,
-            "chunk_id": self.chunk_id,
-            "content": self.content,
-            "score": self.score,
-            "rank": self.rank,
-            "source": self.source,
-            "metadata": self.metadata or {}
-        }
 
 
 class RRFFusion:

@@ -45,7 +45,8 @@ class MySQLRepository(BaseRepository[T], Generic[T]):
             EvaluationCaseResultORM, EvaluationSummaryORM,
             RetrieverTestCaseORM, GenerationTestCaseORM,
             RetrieverEvaluationResultORM, GenerationEvaluationResultORM,
-            TaskQueueORM
+            TaskQueueORM, TestSetKnowledgeBaseORM, ImportTaskORM,
+            KnowledgeBaseORM, DocumentORM, DocumentChunkORM
         )
         
         model_map = {
@@ -59,16 +60,25 @@ class MySQLRepository(BaseRepository[T], Generic[T]):
             "retriever_evaluation_results": RetrieverEvaluationResultORM,
             "generation_evaluation_results": GenerationEvaluationResultORM,
             "task_queue": TaskQueueORM,
+            "test_set_knowledge_bases": TestSetKnowledgeBaseORM,
+            "import_tasks": ImportTaskORM,
+            "knowledge_bases": KnowledgeBaseORM,
+            "documents": DocumentORM,
+            "document_chunks": DocumentChunkORM,
         }
         
         if self.table_name not in model_map:
-            raise ValueError(f"未找到表 {self.table_name} 对应的ORM模型")
-        
+            raise ValueError(f"未找到表 {self.table_name} 对应的ORM模型")    
         return model_map[self.table_name]
     
     def _pydantic_to_orm(self, entity: T) -> Any:
         """将Pydantic模型转换为ORM模型"""
         entity_dict = entity.model_dump(exclude={'created_at', 'updated_at'})
+        
+        # 处理 metadata -> meta_data 映射（如果 ORM 模型使用 meta_data）
+        if 'metadata' in entity_dict and hasattr(self.orm_model, 'meta_data'):
+            entity_dict['meta_data'] = entity_dict.pop('metadata')
+        
         # 处理datetime字符串转换为datetime对象
         from datetime import datetime
         if 'created_at' in entity.model_dump() and entity.created_at:
@@ -88,17 +98,37 @@ class MySQLRepository(BaseRepository[T], Generic[T]):
         if orm_obj is None:
             return None
         
+        # 获取Pydantic模型的字段集合（排除schema_config等内部字段）
+        pydantic_fields = set(self.entity_type.model_fields.keys())
+        
         # 将ORM对象转换为字典
         result_dict = {}
         for column in self.orm_model.__table__.columns:
-            value = getattr(orm_obj, column.name)
+            # 获取数据库列名
+            db_column_name = column.name
+            
+            # 跳过不在Pydantic模型中的字段（如schema_config）
+            if db_column_name not in pydantic_fields and db_column_name != 'metadata':
+                continue
+            
+            # 检查是否有对应的 Python 属性（可能不同名）
+            # 如果列名是 metadata，但属性名是 meta_data
+            if db_column_name == 'metadata' and hasattr(orm_obj, 'meta_data'):
+                value = getattr(orm_obj, 'meta_data', None)
+                pydantic_key = 'metadata'  # Pydantic 模型使用 metadata
+            else:
+                # 使用列名作为属性名
+                value = getattr(orm_obj, db_column_name, None)
+                pydantic_key = db_column_name
+            
             # 处理datetime
             if hasattr(value, 'isoformat'):
                 value = value.isoformat()
             # 处理None值
             elif value is None:
                 value = None
-            result_dict[column.name] = value
+            
+            result_dict[pydantic_key] = value
         
         return self.entity_type(**result_dict)
     

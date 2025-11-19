@@ -112,7 +112,7 @@ class TestCaseORM(Base):
     query = Column(Text, nullable=False)
     expected_chunks = Column(JSON, nullable=True)
     expected_answer = Column(Text, nullable=True)
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column('metadata', JSON, nullable=True)  # 使用 name 参数避免与 SQLAlchemy 保留属性冲突
     
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
@@ -126,7 +126,7 @@ class RetrieverTestCaseORM(Base):
     test_set_id = Column(String(50), ForeignKey("test_sets.id", ondelete="CASCADE"), nullable=False, index=True)
     question = Column(Text, nullable=False)
     expected_answers = Column(JSON, nullable=False)  # Array of {answer_text, chunk_id, relevance_score}
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column('metadata', JSON, nullable=True)  # 使用 name 参数避免与 SQLAlchemy 保留属性冲突
     
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
@@ -145,7 +145,7 @@ class GenerationTestCaseORM(Base):
     question = Column(Text, nullable=False)
     reference_answer = Column(Text, nullable=False)
     reference_contexts = Column(JSON, nullable=True)  # Array of strings
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column('metadata', JSON, nullable=True)  # 使用 name 参数避免与 SQLAlchemy 保留属性冲突
     
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
@@ -306,3 +306,119 @@ class TaskQueueORM(Base):
         Index('idx_task_queue_type', 'task_type'),
     )
 
+# 在文件末尾添加
+
+class KnowledgeBaseORM(Base):
+    """知识库ORM模型"""
+    __tablename__ = "knowledge_bases"
+    
+    id = Column(String(50), primary_key=True)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    
+    # 嵌入配置
+    embedding_provider = Column(String(20), nullable=False, default="ollama")
+    embedding_model = Column(String(100), nullable=False)
+    embedding_dimension = Column(Integer, default=768)
+    
+    # 向量数据库配置
+    vector_db_type = Column(String(20), nullable=False)
+    vector_db_config = Column(JSON, nullable=True)
+    schema_config = Column(JSON, nullable=True)  # Schema配置（字段定义等）
+    
+    # 分块配置
+    chunk_size = Column(Integer, default=512)
+    chunk_overlap = Column(Integer, default=50)
+    
+    # 检索配置
+    retrieval_top_k = Column(Integer, default=5)
+    retrieval_score_threshold = Column(Float, default=0.7)
+    
+    # 统计信息
+    document_count = Column(Integer, default=0)
+    chunk_count = Column(Integer, default=0)
+    
+    # 状态
+    is_active = Column(Boolean, default=True, nullable=False)
+    
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        Index('idx_kb_name', 'name'),
+        Index('idx_kb_active', 'is_active'),
+    )
+
+
+class DocumentORM(Base):
+    """文档ORM模型"""
+    __tablename__ = "documents"
+    
+    id = Column(String(50), primary_key=True)
+    kb_id = Column(String(50), nullable=False, index=True)
+    
+    # 文档基本信息
+    name = Column(String(200), nullable=False)
+    external_id = Column(String(100), nullable=True)
+    file_path = Column(String(500), nullable=False)
+    file_size = Column(Integer, default=0)
+    file_type = Column(String(20), nullable=False)
+    
+    # 文档内容
+    content = Column(Text, nullable=True)
+    
+    # 处理状态
+    status = Column(String(20), nullable=False, default="uploaded", index=True)
+    error_message = Column(Text, nullable=True)
+    
+    # 处理结果
+    chunk_count = Column(Integer, default=0)
+    
+    # 元数据
+    meta_data = Column('metadata', JSON, nullable=True)  # 使用 name 参数避免与 SQLAlchemy 保留属性冲突
+    
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        Index('idx_doc_kb', 'kb_id'),
+        Index('idx_doc_status', 'status'),
+    )
+
+
+class DocumentChunkORM(Base):
+    """文档分块ORM模型"""
+    __tablename__ = "document_chunks"
+    
+    id = Column(String(50), primary_key=True)
+    document_id = Column(String(50), nullable=False, index=True)
+    kb_id = Column(String(50), nullable=False, index=True)
+    
+    # 分块内容
+    content = Column(Text, nullable=False)
+    chunk_index = Column(Integer, nullable=False)
+    
+    # 分块元数据
+    start_pos = Column(Integer, nullable=True)
+    end_pos = Column(Integer, nullable=True)
+    token_count = Column(Integer, nullable=True)
+    
+    # 向量信息
+    embedding = Column(JSON, nullable=True)  # 存储为JSON数组
+    embedding_model = Column(String(100), nullable=True)
+    
+    # 索引信息
+    vector_id = Column(String(100), nullable=True)
+    is_indexed = Column(Boolean, default=False, nullable=False)
+    
+    # 元数据
+    meta_data = Column('metadata', JSON, nullable=True)  # 使用 name 参数避免与 SQLAlchemy 保留属性冲突
+    
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        Index('idx_chunk_doc', 'document_id'),
+        Index('idx_chunk_kb', 'kb_id'),
+        Index('idx_chunk_indexed', 'is_indexed'),
+    )

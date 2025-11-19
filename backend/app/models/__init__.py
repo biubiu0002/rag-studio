@@ -13,15 +13,16 @@ from app.models.document import (
     DocumentChunk,
     DocumentStatus,
     DocumentType,
+    Chunk,
 )
 from app.models.test import (
     TestSet,
     TestCase,
-    RetrievalTestResult,
-    GenerationTestResult,
     TestType,
     TestStatus,
 )
+from app.models.retrieval import RetrievalResult
+from app.models.retriever_evaluation import RetrievalMetrics
 
 __all__ = [
     # 基础
@@ -37,12 +38,17 @@ __all__ = [
     "DocumentChunk",
     "DocumentStatus",
     "DocumentType",
+    "Chunk",
     
     # 测试
     "TestSet",
     "TestCase",
-    "RetrievalTestResult",
-    "GenerationTestResult",
     "TestType",
     "TestStatus",
+    
+    # 检索
+    "RetrievalResult",
+    
+    # 检索器评估
+    "RetrievalMetrics",
 ]

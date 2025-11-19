@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = Field(default="", description="数据库密码")
     DB_NAME: str = Field(default="rag_studio", description="数据库名称")
     
+    # 数据库连接池配置
+    DB_POOL_SIZE: int = Field(default=5, description="连接池大小（保持的连接数）")
+    DB_MAX_OVERFLOW: int = Field(default=10, description="连接池最大溢出连接数")
+    DB_POOL_TIMEOUT: int = Field(default=30, description="获取连接的超时时间（秒）")
+    DB_POOL_RECYCLE: int = Field(default=3600, description="连接回收时间（秒），超过此时间的连接会被回收")
+    DB_POOL_PRE_PING: bool = Field(default=True, description="连接前是否执行ping检查，确保连接有效")
+    
     # 存储配置
     STORAGE_TYPE: str = Field(default="json", description="存储类型: json 或 mysql")
     STORAGE_PATH: str = Field(default=os.path.join(PROJECT_ROOT, "storage"), description="JSON文件存储路径")
@@ -93,7 +100,11 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         """获取数据库连接URL"""
-        return f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?charset=utf8mb4"
+        from urllib.parse import quote_plus
+        # 对密码进行 URL 编码，避免特殊字符（如 @）导致解析错误
+        encoded_password = quote_plus(self.DB_PASSWORD) if self.DB_PASSWORD else ""
+        encoded_user = quote_plus(self.DB_USER) if self.DB_USER else ""
+        return f"mysql+pymysql://{encoded_user}:{encoded_password}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?charset=utf8mb4"
     
     @property
     def elasticsearch_url(self) -> str:

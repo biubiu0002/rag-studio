@@ -2,7 +2,7 @@
 知识库相关的请求和响应Schema
 """
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 
 from app.models.knowledge_base import EmbeddingProvider, VectorDBType
@@ -102,4 +102,11 @@ class KnowledgeBaseResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class UpdateSchemaRequest(BaseModel):
+    """更新Schema请求"""
+    schema_fields: List[dict] = Field(..., description="Schema字段列表")
+    vector_db_type: Optional[str] = Field(None, description="向量数据库类型")
+    vector_db_config: Optional[Dict[str, Any]] = Field(None, description="向量数据库配置")
 

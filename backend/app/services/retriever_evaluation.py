@@ -5,22 +5,11 @@
 
 from typing import List, Dict, Any, Optional
 import logging
-from dataclasses import dataclass
 import numpy as np
 
+from app.models.retriever_evaluation import RetrievalMetrics
+
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class RetrievalMetrics:
-    """检索评估指标"""
-    precision: float
-    recall: float
-    f1_score: float
-    mrr: float  # Mean Reciprocal Rank
-    map_score: float  # Mean Average Precision
-    ndcg: float  # Normalized Discounted Cumulative Gain
-    hit_rate: float  # 命中率
 
 
 class RetrieverEvaluator:

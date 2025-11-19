@@ -5,12 +5,12 @@
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
 
 from app.schemas.knowledge_base import (
     KnowledgeBaseCreate,
     KnowledgeBaseUpdate,
     KnowledgeBaseResponse,
+    UpdateSchemaRequest,
 )
 from app.schemas.common import PaginationParams, IDResponse, MessageResponse
 from app.core.response import success_response, page_response
@@ -242,11 +242,6 @@ async def get_knowledge_base_schema(kb_id: str):
     )
 
 
-class UpdateSchemaRequest(BaseModel):
-    """更新Schema请求"""
-    schema_fields: List[dict] = Field(..., description="Schema字段列表")
-    vector_db_type: Optional[str] = Field(None, description="向量数据库类型")
-    vector_db_config: Optional[Dict[str, Any]] = Field(None, description="向量数据库配置")
 
 
 @router.put("/{kb_id}/schema", response_model=None, summary="更新知识库Schema配置")

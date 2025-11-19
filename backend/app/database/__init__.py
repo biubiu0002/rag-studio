@@ -16,10 +16,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 # 同步引擎（暂时使用，后续可改为异步）
+# 使用连接池配置
 engine = create_engine(
     settings.database_url,
-    pool_pre_ping=True,
-    pool_recycle=3600,
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
+    pool_timeout=settings.DB_POOL_TIMEOUT,
+    pool_recycle=settings.DB_POOL_RECYCLE,
+    pool_pre_ping=settings.DB_POOL_PRE_PING,
     echo=settings.DEBUG
 )
 

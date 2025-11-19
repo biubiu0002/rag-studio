@@ -4,6 +4,7 @@
 
 from typing import Optional, List, Dict, Any
 from enum import Enum
+from dataclasses import dataclass, field
 from pydantic import Field
 
 from app.models.base import BaseModelMixin
@@ -71,6 +72,29 @@ class Document(BaseModelMixin):
                 "status": "completed",
                 "chunk_count": 50
             }
+        }
+
+
+@dataclass
+class Chunk:
+    """文档分块（用于文档处理）"""
+    index: int
+    content: str
+    start_pos: int
+    end_pos: int
+    char_count: int
+    token_count: Optional[int] = None
+    metadata: Optional[Dict[str, Any]] = field(default_factory=dict)
+    
+    def to_dict(self) -> dict:
+        return {
+            "index": self.index,
+            "content": self.content,
+            "start_pos": self.start_pos,
+            "end_pos": self.end_pos,
+            "char_count": self.char_count,
+            "token_count": self.token_count,
+            "metadata": self.metadata if self.metadata is not None else {}
         }
 
 

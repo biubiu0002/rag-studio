@@ -3,9 +3,22 @@
 """
 
 from typing import Optional, Dict, Any
+from dataclasses import dataclass
 from pydantic import Field
 
 from app.models.base import BaseModelMixin
+
+
+@dataclass
+class RetrievalMetrics:
+    """检索评估指标"""
+    precision: float
+    recall: float
+    f1_score: float
+    mrr: float  # Mean Reciprocal Rank
+    map_score: float  # Mean Average Precision
+    ndcg: float  # Normalized Discounted Cumulative Gain
+    hit_rate: float  # 命中率
 
 
 class RetrieverEvaluationResult(BaseModelMixin):
