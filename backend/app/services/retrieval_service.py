@@ -542,10 +542,11 @@ class RetrievalService:
                 else:
                     provider = kb.embedding_provider
                 
-                # 创建嵌入服务实例
+                # 创建嵌入服务实例，传递embedding_endpoint
                 embedding_service = EmbeddingServiceFactory.create(
                     provider=provider,
-                    model_name=kb.embedding_model
+                    model_name=kb.embedding_model,
+                    service_url=kb.embedding_endpoint  # 使用知识库配置的embedding_endpoint
                 )
                 # 生成向量
                 query_vector = await embedding_service.embed_text(query)
@@ -658,10 +659,11 @@ class RetrievalService:
                 else:
                     provider = kb.embedding_provider
                 
-                # 创建嵌入服务实例并生成向量
+                # 创建嵌入服务实例，传递embedding_endpoint
                 embedding_service = EmbeddingServiceFactory.create(
                     provider=provider,
-                    model_name=kb.embedding_model
+                    model_name=kb.embedding_model,
+                    service_url=kb.embedding_endpoint  # 使用知识库配置的embedding_endpoint
                 )
                 query_vector = await embedding_service.embed_text(query)
                 

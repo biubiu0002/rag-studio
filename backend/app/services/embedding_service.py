@@ -54,9 +54,10 @@ class OllamaEmbeddingService(BaseEmbeddingService):
     通过HTTP API调用Ollama服务获取文本嵌入向量
     """
     
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, service_url: str = None):
         self.model_name = model_name
-        self.base_url = settings.OLLAMA_BASE_URL.rstrip('/')
+        # 优先使用指定的service_url，否则使用全局配置
+        self.base_url = (service_url or settings.OLLAMA_BASE_URL).rstrip('/')
         self.api_url = f"{self.base_url}/api/embeddings"
         self.timeout = 60.0  # 请求超时时间（秒）
         self.max_retries = 3  # 最大重试次数
@@ -284,14 +285,15 @@ class EmbeddingServiceFactory:
         Args:
             provider: 嵌入提供商
             model_name: 模型名称
-            service_url: 服务地址（自研服务用）
+            service_url: 服务地址（可用于Ollama和自研服务）
             api_key: API密钥（自研服务用）
         
         Returns:
             嵌入服务实例
         """
         if provider == EmbeddingProvider.OLLAMA:
-            return OllamaEmbeddingService(model_name)
+            # 对于Ollama，service_url用作embedding_endpoint
+            return OllamaEmbeddingService(model_name, service_url=service_url)
         elif provider == EmbeddingProvider.CUSTOM:
             if not service_url:
                 service_url = settings.CUSTOM_SERVICE_URL

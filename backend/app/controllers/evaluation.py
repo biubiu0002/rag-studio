@@ -368,3 +368,29 @@ async def get_evaluation_case_result_detail(task_id: str, result_id: str):
         logger.error(f"获取评估用例结果详情失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
 
+
+@router.post("/tasks/{task_id}/cancel", response_model=None, summary="终止评估任务")
+async def cancel_evaluation_task(task_id: str):
+    """
+    终止评估任务
+    
+    只能终止待执行或运行中的任务
+    """
+    try:
+        evaluation_service = EvaluationTaskService()
+        await evaluation_service.cancel_evaluation_task(task_id)
+        
+        return JSONResponse(
+            content=success_response(
+                data={"task_id": task_id},
+                message="评估任务已终止"
+            )
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"终止评估任务失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"终止失败: {str(e)}")
+

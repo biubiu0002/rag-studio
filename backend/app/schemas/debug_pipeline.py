@@ -26,7 +26,9 @@ class EmbedRequest(BaseModel):
     """向量化请求"""
     texts: List[str] = Field(..., description="文本列表")
     model: str = Field("bge-m3:latest", description="Embedding模型")
-    provider: str = Field("ollama", description="Embedding服务提供商")
+    provider: str = Field("ollama", description="Embedding服务提供商: ollama, custom")
+    service_url: Optional[str] = Field(None, description="自定义服务地址（用于Ollama或自定义提供商）")
+    api_key: Optional[str] = Field(None, description="API密钥（用于自定义提供商）")
 
 
 class UnifiedSearchRequest(BaseModel):

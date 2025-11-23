@@ -671,4 +671,33 @@ class EvaluationTaskService:
         total = await self.case_result_repo.count(filters=filters)
         
         return results, total
+    
+    async def cancel_evaluation_task(self, task_id: str) -> bool:
+        """终止评估任务
+        
+        Args:
+            task_id: 评估任务ID
+            
+        Returns:
+            是否成功终止
+        """
+        task = await self.task_repo.get_by_id(task_id)
+        if not task:
+            raise NotFoundException(message=f"评估任务不存在: {task_id}")
+        
+        # 只能终止待执行或运行中的任务
+        if task.status not in [EvaluationStatus.PENDING, EvaluationStatus.RUNNING]:
+            raise ValueError(f"只能终止待执行或运行中的任务，当前状态: {task.status.value}")
+        
+        # 更新任务状态为失败（用失败状态表示已取消）
+        task.status = EvaluationStatus.FAILED
+        task.error_message = "任务已被用户手动终止"
+        if not task.started_at:
+            task.started_at = datetime.now()
+        task.completed_at = datetime.now()
+        
+        await self.task_repo.update(task_id, task)
+        logger.info(f"评估任务 {task_id} 已被终止")
+        
+        return True
 

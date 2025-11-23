@@ -101,7 +101,8 @@ class IndexWritingService:
         """
         embedding_service = EmbeddingServiceFactory.create(
             provider=EmbeddingProvider(kb.embedding_provider),
-            model_name=kb.embedding_model
+            model_name=kb.embedding_model,
+            service_url=kb.embedding_endpoint  # 使用知识库配置的embedding_endpoint
         )
         
         embeddings = await embedding_service.embed_texts(chunks)

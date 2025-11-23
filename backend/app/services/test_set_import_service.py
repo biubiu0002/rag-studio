@@ -394,6 +394,35 @@ class TestSetImportService:
         
         return result, total
     
+    async def cancel_import_task(self, import_task_id: str) -> bool:
+        """终止导入任务
+        
+        Args:
+            import_task_id: 导入任务ID
+            
+        Returns:
+            是否成功终止
+        """
+        import_task = await self.import_task_repo.get_by_id(import_task_id)
+        if not import_task:
+            raise NotFoundException(message=f"导入任务不存在: {import_task_id}")
+        
+        # 只能终止待执行或运行中的任务
+        if import_task.status not in ["pending", "running"]:
+            raise ValueError(f"只能终止待执行或运行中的任务，当前状态: {import_task.status}")
+        
+        # 更新任务状态为失败（用失败状态表示已取消）
+        import_task.status = "failed"
+        import_task.error_message = "任务已被用户手动终止"
+        if not import_task.started_at:
+            import_task.started_at = datetime.now()
+        import_task.completed_at = datetime.now()
+        
+        await self.import_task_repo.update(import_task_id, import_task)
+        logger.info(f"导入任务 {import_task_id} 已被终止")
+        
+        return True
+    
     async def _delete_document_chunks(self, document_id: str):
         """
         删除文档的所有chunks和对应的向量

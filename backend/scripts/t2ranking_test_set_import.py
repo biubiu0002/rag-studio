@@ -21,9 +21,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # 硬编码的文件路径
-QUERIES_PATH = "/Users/yeruijian/Documents/知识库平台/dataset/T2Ranking/data/queries.dev.tsv"
-COLLECTION_PATH = "/Users/yeruijian/Documents/知识库平台/dataset/T2Ranking/data/collection.tsv"
-QRELS_PATH = "/Users/yeruijian/Documents/知识库平台/dataset/T2Ranking/data/qrels.dev.tsv"
+QUERIES_PATH = "/root/t2ranking/queries.dev.tsv"
+COLLECTION_PATH = "/root/t2ranking/collection.tsv"
+QRELS_PATH = "/root/t2ranking/qrels.dev.tsv"
 
 # 测试集配置
 TEST_SET_NAME = "t2ranking_first_100"

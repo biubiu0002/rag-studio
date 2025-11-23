@@ -189,7 +189,9 @@ async def embed_documents(request: EmbedRequest):
         provider_enum = EmbeddingProvider(request.provider)
         embedding_service = EmbeddingServiceFactory.create(
             provider=provider_enum,
-            model_name=request.model
+            model_name=request.model,
+            service_url=request.service_url,  # 传递自定义服务地址
+            api_key=request.api_key  # 传递API密钥
         )
         
         # 批量向量化

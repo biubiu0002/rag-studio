@@ -1,8 +1,14 @@
-"use client"
+"use client";
 
-import { useState, useEffect } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import { useState, useEffect } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -10,209 +16,242 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { Progress } from "@/components/ui/progress"
-import { testAPI, knowledgeBaseAPI, KnowledgeBase } from "@/lib/api"
-import { showToast } from "@/lib/toast"
-import { Plus, CheckCircle2, XCircle, Clock, Loader2 } from "lucide-react"
+} from "@/components/ui/select";
+import { Progress } from "@/components/ui/progress";
+import { testAPI, knowledgeBaseAPI, KnowledgeBase } from "@/lib/api";
+import { showToast } from "@/lib/toast";
+import { Plus, CheckCircle2, XCircle, Clock, Loader2 } from "lucide-react";
 
 interface ImportHistoryItem {
-  id: string
-  test_set_id: string
-  kb_id: string
-  imported_at: string
-  import_config: Record<string, any>
-  kb_deleted: boolean
-  test_set_deleted: boolean
+  id: string;
+  test_set_id: string;
+  kb_id: string;
+  imported_at: string;
+  import_config: Record<string, any>;
+  kb_deleted: boolean;
+  test_set_deleted: boolean;
   import_task?: {
-    id: string
-    status: string
-    progress: number
-    total_docs: number
-    imported_docs: number
-    failed_docs: number
-  }
+    id: string;
+    status: string;
+    progress: number;
+    total_docs: number;
+    imported_docs: number;
+    failed_docs: number;
+  };
 }
 
 interface TestSetImportHistoryViewProps {
-  testSetId: string
+  testSetId: string;
 }
 
-export default function TestSetImportHistoryView({ testSetId }: TestSetImportHistoryViewProps) {
-  const [loading, setLoading] = useState(false)
-  const [history, setHistory] = useState<ImportHistoryItem[]>([])
-  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([])
-  const [page, setPage] = useState(1)
-  const [total, setTotal] = useState(0)
-  const [pageSize] = useState(20)
-  
+export default function TestSetImportHistoryView({
+  testSetId,
+}: TestSetImportHistoryViewProps) {
+  const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState<ImportHistoryItem[]>([]);
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [pageSize] = useState(20);
+
   // 导入对话框状态
-  const [importDialogOpen, setImportDialogOpen] = useState(false)
-  const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
-  const [selectedKbId, setSelectedKbId] = useState<string>("")
-  const [updateExisting, setUpdateExisting] = useState(true)
-  const [previewData, setPreviewData] = useState<any>(null)
-  const [importTaskId, setImportTaskId] = useState<string | null>(null)
-  const [importProgress, setImportProgress] = useState(0)
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
+  const [selectedKbId, setSelectedKbId] = useState<string>("");
+  const [updateExisting, setUpdateExisting] = useState(true);
+  const [previewData, setPreviewData] = useState<any>(null);
+  const [importTaskId, setImportTaskId] = useState<string | null>(null);
+  const [importProgress, setImportProgress] = useState(0);
 
   // 加载导入历史
   useEffect(() => {
-    loadHistory()
-  }, [testSetId, page])
+    loadHistory();
+  }, [testSetId, page]);
 
   // 轮询导入进度
   useEffect(() => {
     if (importTaskId) {
       const interval = setInterval(() => {
-        checkImportProgress()
-      }, 2000)
-      return () => clearInterval(interval)
+        checkImportProgress();
+      }, 2000);
+      return () => clearInterval(interval);
     }
-  }, [importTaskId])
+  }, [importTaskId]);
 
   const loadHistory = async () => {
     try {
-      setLoading(true)
-      const result = await testAPI.getTestSetImportHistory(testSetId, page, pageSize)
-      setHistory(result.data)
-      setTotal(result.total)
+      setLoading(true);
+      const result = await testAPI.getTestSetImportHistory(
+        testSetId,
+        page,
+        pageSize
+      );
+      setHistory(result.data);
+      setTotal(result.total);
     } catch (error) {
-      console.error("加载导入历史失败:", error)
-      showToast("加载导入历史失败", "error")
+      console.error("加载导入历史失败:", error);
+      showToast("加载导入历史失败", "error");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const loadKnowledgeBases = async () => {
     try {
-      const result = await knowledgeBaseAPI.list(1, 100)
-      setKnowledgeBases(result.data)
+      const result = await knowledgeBaseAPI.list(1, 100);
+      setKnowledgeBases(result.data);
     } catch (error) {
-      console.error("加载知识库失败:", error)
-      showToast("加载知识库失败", "error")
+      console.error("加载知识库失败:", error);
+      showToast("加载知识库失败", "error");
     }
-  }
+  };
 
   const handlePreview = async () => {
     if (!selectedKbId) {
-      showToast("请选择知识库", "error")
-      return
+      showToast("请选择知识库", "error");
+      return;
     }
 
     try {
-      setLoading(true)
-      const result = await testAPI.previewTestSetImport(testSetId, selectedKbId)
-      setPreviewData(result.data)
-      setPreviewDialogOpen(true)
+      setLoading(true);
+      const result = await testAPI.previewTestSetImport(
+        testSetId,
+        selectedKbId
+      );
+      setPreviewData(result.data);
+      setPreviewDialogOpen(true);
     } catch (error) {
-      console.error("预览导入失败:", error)
-      showToast("预览导入失败: " + (error as Error).message, "error")
+      console.error("预览导入失败:", error);
+      showToast("预览导入失败: " + (error as Error).message, "error");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const handleImport = async () => {
     if (!selectedKbId) {
-      showToast("请选择知识库", "error")
-      return
+      showToast("请选择知识库", "error");
+      return;
     }
 
     try {
-      setLoading(true)
+      setLoading(true);
       const result = await testAPI.importTestSetToKnowledgeBase(testSetId, {
         kb_id: selectedKbId,
         update_existing: updateExisting,
-      })
-      setImportTaskId(result.data.id)
-      setImportDialogOpen(false)
-      setPreviewDialogOpen(false)
-      showToast("导入任务已创建", "success")
-      loadHistory()
+      });
+      setImportTaskId(result.data.id);
+      setImportDialogOpen(false);
+      setPreviewDialogOpen(false);
+      showToast("导入任务已创建", "success");
+      loadHistory();
     } catch (error) {
-      console.error("创建导入任务失败:", error)
-      showToast("创建导入任务失败: " + (error as Error).message, "error")
+      console.error("创建导入任务失败:", error);
+      showToast("创建导入任务失败: " + (error as Error).message, "error");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const checkImportProgress = async () => {
-    if (!importTaskId) return
+    if (!importTaskId) return;
 
     try {
-      const result = await testAPI.getImportTask(importTaskId)
-      setImportProgress(result.data.progress)
-      
-      if (result.data.status === "completed" || result.data.status === "failed") {
-        setImportTaskId(null)
-        loadHistory()
+      const result = await testAPI.getImportTask(importTaskId);
+      setImportProgress(result.data.progress);
+
+      if (
+        result.data.status === "completed" ||
+        result.data.status === "failed"
+      ) {
+        setImportTaskId(null);
+        loadHistory();
         if (result.data.status === "completed") {
-          showToast("导入完成", "success")
+          showToast("导入完成", "success");
         } else {
-          showToast("导入失败: " + (result.data.error_message || "未知错误"), "error")
+          showToast(
+            "导入失败: " + (result.data.error_message || "未知错误"),
+            "error"
+          );
         }
       }
     } catch (error) {
-      console.error("查询导入进度失败:", error)
+      console.error("查询导入进度失败:", error);
     }
-  }
+  };
+
+  const handleCancelImportTask = async (taskId: string) => {
+    if (!confirm("确定要终止这个导入任务吗？")) {
+      return;
+    }
+
+    try {
+      await testAPI.cancelImportTask(taskId);
+      showToast("导入任务已终止", "success");
+      setImportTaskId(null);
+      loadHistory();
+    } catch (error) {
+      console.error("终止导入任务失败:", error);
+      showToast("终止导入任务失败", "error");
+    }
+  };
 
   const getKbName = (kbId: string) => {
-    const kb = knowledgeBases.find(k => k.id === kbId)
-    return kb ? kb.name : kbId
-  }
+    const kb = knowledgeBases.find((k) => k.id === kbId);
+    return kb ? kb.name : kbId;
+  };
 
   const getStatusIcon = (status?: string) => {
-    if (!status) return null
+    if (!status) return null;
     switch (status) {
       case "completed":
-        return <CheckCircle2 className="h-4 w-4 text-green-600" />
+        return <CheckCircle2 className="h-4 w-4 text-green-600" />;
       case "failed":
-        return <XCircle className="h-4 w-4 text-red-600" />
+        return <XCircle className="h-4 w-4 text-red-600" />;
       case "running":
-        return <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
+        return <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />;
       case "pending":
-        return <Clock className="h-4 w-4 text-gray-600" />
+        return <Clock className="h-4 w-4 text-gray-600" />;
       default:
-        return null
+        return null;
     }
-  }
+  };
 
   const getStatusText = (status?: string) => {
-    if (!status) return "未知"
+    if (!status) return "未知";
     switch (status) {
       case "completed":
-        return "已完成"
+        return "已完成";
       case "failed":
-        return "失败"
+        return "失败";
       case "running":
-        return "进行中"
+        return "进行中";
       case "pending":
-        return "等待中"
+        return "等待中";
       default:
-        return status
+        return status;
     }
-  }
+  };
 
   useEffect(() => {
-    loadKnowledgeBases()
-  }, [])
+    loadKnowledgeBases();
+  }, []);
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold text-gray-900">导入历史</h3>
-          <p className="text-sm text-gray-500 mt-1">查看该测试集导入到各个知识库的记录</p>
+          <p className="text-sm text-gray-500 mt-1">
+            查看该测试集导入到各个知识库的记录
+          </p>
         </div>
         <Button onClick={() => setImportDialogOpen(true)}>
           <Plus className="h-4 w-4 mr-2" />
@@ -249,7 +288,9 @@ export default function TestSetImportHistoryView({ testSetId }: TestSetImportHis
                       )}
                     </div>
                     <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
-                      <span>导入时间: {new Date(item.imported_at).toLocaleString()}</span>
+                      <span>
+                        导入时间: {new Date(item.imported_at).toLocaleString()}
+                      </span>
                       {item.import_task && (
                         <>
                           <span className="flex items-center gap-1">
@@ -257,7 +298,10 @@ export default function TestSetImportHistoryView({ testSetId }: TestSetImportHis
                             {getStatusText(item.import_task.status)}
                           </span>
                           {item.import_task.status === "running" && (
-                            <span>进度: {Math.round(item.import_task.progress * 100)}%</span>
+                            <span>
+                              进度:{" "}
+                              {Math.round(item.import_task.progress * 100)}%
+                            </span>
                           )}
                         </>
                       )}
@@ -268,11 +312,30 @@ export default function TestSetImportHistoryView({ testSetId }: TestSetImportHis
                           <span>总文档: {item.import_task.total_docs}</span>
                           <span>已导入: {item.import_task.imported_docs}</span>
                           {item.import_task.failed_docs > 0 && (
-                            <span className="text-red-600">失败: {item.import_task.failed_docs}</span>
+                            <span className="text-red-600">
+                              失败: {item.import_task.failed_docs}
+                            </span>
                           )}
                         </div>
                         {item.import_task.status === "running" && (
-                          <Progress value={item.import_task.progress * 100} className="h-2" />
+                          <>
+                            <Progress
+                              value={item.import_task.progress * 100}
+                              className="h-2"
+                            />
+                            <div className="mt-2 flex justify-end">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  handleCancelImportTask(item.import_task!.id)
+                                }
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                              >
+                                终止
+                              </Button>
+                            </div>
+                          </>
                         )}
                       </div>
                     )}
@@ -320,7 +383,9 @@ export default function TestSetImportHistoryView({ testSetId }: TestSetImportHis
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-2">选择知识库 *</label>
+              <label className="block text-sm font-medium mb-2">
+                选择知识库 *
+              </label>
               <Select value={selectedKbId} onValueChange={setSelectedKbId}>
                 <SelectTrigger>
                   <SelectValue placeholder="选择知识库" />
@@ -348,7 +413,10 @@ export default function TestSetImportHistoryView({ testSetId }: TestSetImportHis
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setImportDialogOpen(false)}
+            >
               取消
             </Button>
             <Button onClick={handlePreview} disabled={!selectedKbId || loading}>
@@ -370,25 +438,36 @@ export default function TestSetImportHistoryView({ testSetId }: TestSetImportHis
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-3 bg-gray-50 rounded">
                   <div className="text-sm text-gray-500">总答案数</div>
-                  <div className="text-2xl font-bold">{previewData.total_answers}</div>
+                  <div className="text-2xl font-bold">
+                    {previewData.total_answers}
+                  </div>
                 </div>
                 <div className="p-3 bg-blue-50 rounded">
                   <div className="text-sm text-blue-600">将新增文档</div>
-                  <div className="text-2xl font-bold text-blue-700">{previewData.new_docs}</div>
+                  <div className="text-2xl font-bold text-blue-700">
+                    {previewData.new_docs}
+                  </div>
                 </div>
                 <div className="p-3 bg-yellow-50 rounded">
                   <div className="text-sm text-yellow-600">已存在文档</div>
-                  <div className="text-2xl font-bold text-yellow-700">{previewData.existing_docs}</div>
+                  <div className="text-2xl font-bold text-yellow-700">
+                    {previewData.existing_docs}
+                  </div>
                 </div>
                 <div className="p-3 bg-gray-50 rounded">
                   <div className="text-sm text-gray-500">将跳过文档</div>
-                  <div className="text-2xl font-bold">{previewData.skipped_docs}</div>
+                  <div className="text-2xl font-bold">
+                    {previewData.skipped_docs}
+                  </div>
                 </div>
               </div>
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPreviewDialogOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setPreviewDialogOpen(false)}
+            >
               取消
             </Button>
             <Button onClick={handleImport} disabled={loading}>
@@ -405,14 +484,23 @@ export default function TestSetImportHistoryView({ testSetId }: TestSetImportHis
             <div className="flex items-center gap-3">
               <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />
               <div className="flex-1">
-                <div className="text-sm font-medium text-blue-900">导入进行中...</div>
+                <div className="text-sm font-medium text-blue-900">
+                  导入进行中...
+                </div>
                 <Progress value={importProgress * 100} className="h-2 mt-2" />
               </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleCancelImportTask(importTaskId)}
+                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+              >
+                终止
+              </Button>
             </div>
           </CardContent>
         </Card>
       )}
     </div>
-  )
+  );
 }
-

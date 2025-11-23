@@ -320,6 +320,12 @@ class KnowledgeBaseORM(Base):
     embedding_provider = Column(String(20), nullable=False, default="ollama")
     embedding_model = Column(String(100), nullable=False)
     embedding_dimension = Column(Integer, default=768)
+    embedding_endpoint = Column(String(500), nullable=True)
+    
+    # Chat模型配置
+    chat_provider = Column(String(20), nullable=False, default="ollama")
+    chat_model = Column(String(100), nullable=True)
+    chat_endpoint = Column(String(500), nullable=True)
     
     # 向量数据库配置
     vector_db_type = Column(String(20), nullable=False)

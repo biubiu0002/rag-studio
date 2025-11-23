@@ -11,6 +11,7 @@ from app.schemas.knowledge_base import (
     KnowledgeBaseUpdate,
     KnowledgeBaseResponse,
     UpdateSchemaRequest,
+    AIModelConfigRequest,
 )
 from app.schemas.common import PaginationParams, IDResponse, MessageResponse
 from app.core.response import success_response, page_response
@@ -272,6 +273,108 @@ async def update_knowledge_base_schema(
     return JSONResponse(
         content=success_response(
             message="Schema配置更新成功"
+        )
+    )
+
+
+@router.get("/{kb_id}/ai-model-config", response_model=None, summary="获取知识库AI模型配置")
+async def get_ai_model_config(kb_id: str):
+    """
+    获取知识库的AI模型配置
+    
+    - **kb_id**: 知识库ID
+    """
+    from app.services.knowledge_base import KnowledgeBaseService
+    
+    service = KnowledgeBaseService()
+    kb = await service.get_knowledge_base(kb_id)
+    
+    if not kb:
+        raise NotFoundException(message=f"知识库不存在: {kb_id}")
+    
+    config = {
+        "embedding_provider": kb.embedding_provider,
+        "embedding_model": kb.embedding_model,
+        "embedding_endpoint": kb.embedding_endpoint,
+        "chat_provider": kb.chat_provider,
+        "chat_model": kb.chat_model,
+        "chat_endpoint": kb.chat_endpoint,
+    }
+    
+    return JSONResponse(
+        content=success_response(data=config)
+    )
+
+
+@router.put("/{kb_id}/ai-model-config", response_model=None, summary="更新知识库AI模型配置")
+async def update_ai_model_config(kb_id: str, request: AIModelConfigRequest):
+    """
+    更新知识库的AI模型配置
+    
+    - **kb_id**: 知识库ID
+    - **request**: AI模型配置
+    """
+    from app.services.knowledge_base import KnowledgeBaseService
+    
+    service = KnowledgeBaseService()
+    success = await service.update_ai_model_config(kb_id, request)
+    
+    if not success:
+        raise NotFoundException(message=f"知识库不存在: {kb_id}")
+    
+    return JSONResponse(
+        content=success_response(
+            message="AI模型配置更新成功"
+        )
+    )
+@router.get("/{kb_id}/ai-model-config", response_model=None, summary="获取知识库AI模型配置")
+async def get_ai_model_config(kb_id: str):
+    """
+    获取知识库的AI模型配置
+    
+    - **kb_id**: 知识库ID
+    """
+    from app.services.knowledge_base import KnowledgeBaseService
+    
+    service = KnowledgeBaseService()
+    kb = await service.get_knowledge_base(kb_id)
+    
+    if not kb:
+        raise NotFoundException(message=f"知识库不存在: {kb_id}")
+    
+    config = {
+        "embedding_provider": kb.embedding_provider,
+        "embedding_model": kb.embedding_model,
+        "embedding_endpoint": kb.embedding_endpoint,
+        "chat_provider": kb.chat_provider,
+        "chat_model": kb.chat_model,
+        "chat_endpoint": kb.chat_endpoint,
+    }
+    
+    return JSONResponse(
+        content=success_response(data=config)
+    )
+
+
+@router.put("/{kb_id}/ai-model-config", response_model=None, summary="更新知识库AI模型配置")
+async def update_ai_model_config(kb_id: str, request: AIModelConfigRequest):
+    """
+    更新知识库的AI模型配置
+    
+    - **kb_id**: 知识库ID
+    - **request**: AI模型配置
+    """
+    from app.services.knowledge_base import KnowledgeBaseService
+    
+    service = KnowledgeBaseService()
+    success = await service.update_ai_model_config(kb_id, request)
+    
+    if not success:
+        raise NotFoundException(message=f"知识库不存在: {kb_id}")
+    
+    return JSONResponse(
+        content=success_response(
+            message="AI模型配置更新成功"
         )
     )
 

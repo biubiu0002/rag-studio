@@ -394,6 +394,43 @@ async def get_import_task(import_task_id: str = Path(..., description="导入任
         )
 
 
+@router.post("/import-tasks/{import_task_id}/cancel", response_model=None, summary="终止导入任务")
+async def cancel_import_task(import_task_id: str = Path(..., description="导入任务ID")):
+    """
+    终止导入任务
+    
+    只能终止待执行或运行中的任务
+    """
+    try:
+        from app.services.test_set_import_service import TestSetImportService
+        
+        import_service = TestSetImportService()
+        await import_service.cancel_import_task(import_task_id)
+        
+        return JSONResponse(
+            content=success_response(
+                data={"import_task_id": import_task_id},
+                message="导入任务已终止"
+            )
+        )
+    except NotFoundException as e:
+        return JSONResponse(
+            status_code=404,
+            content=error_response(message=str(e))
+        )
+    except ValueError as e:
+        return JSONResponse(
+            status_code=400,
+            content=error_response(message=str(e))
+        )
+    except Exception as e:
+        logger.error(f"终止导入任务失败: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content=error_response(message=f"终止导入任务失败: {str(e)}")
+        )
+
+
 @router.get("/knowledge-bases/{kb_id}/test-sets", response_model=None, summary="获取知识库已导入的测试集列表")
 async def get_knowledge_base_test_sets(
     kb_id: str = Path(..., description="知识库ID"),

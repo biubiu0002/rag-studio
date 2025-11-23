@@ -5,7 +5,25 @@
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 
-from app.models.knowledge_base import EmbeddingProvider, VectorDBType
+from app.models.knowledge_base import EmbeddingProvider, ChatProvider, VectorDBType
+
+
+class AIModelConfigRequest(BaseModel):
+    """AI模型配置请求"""
+    
+    embedding_provider: EmbeddingProvider = Field(
+        default=EmbeddingProvider.OLLAMA,
+        description="Embedding模型提供商"
+    )
+    embedding_model: str = Field(..., description="Embedding模型名称")
+    embedding_endpoint: Optional[str] = Field(None, description="Embedding服务地址")
+    
+    chat_provider: ChatProvider = Field(
+        default=ChatProvider.OLLAMA,
+        description="Chat模型提供商"
+    )
+    chat_model: str = Field(..., description="Chat模型名称")
+    chat_endpoint: Optional[str] = Field(None, description="Chat服务地址")
 
 
 class KnowledgeBaseCreate(BaseModel):
@@ -20,6 +38,14 @@ class KnowledgeBaseCreate(BaseModel):
     )
     embedding_model: str = Field(..., description="嵌入模型名称")
     embedding_dimension: int = Field(default=768, description="向量维度")
+    embedding_endpoint: Optional[str] = Field(None, description="嵌入模型服务地址")
+    
+    chat_provider: ChatProvider = Field(
+        default=ChatProvider.OLLAMA,
+        description="Chat模型提供商"
+    )
+    chat_model: Optional[str] = Field(None, description="Chat模型名称")
+    chat_endpoint: Optional[str] = Field(None, description="Chat模型服务地址")
     
     vector_db_type: VectorDBType = Field(..., description="向量数据库类型")
     vector_db_config: Dict[str, Any] = Field(default_factory=dict, description="向量数据库配置")
@@ -43,6 +69,8 @@ class KnowledgeBaseCreate(BaseModel):
                 "embedding_provider": "ollama",
                 "embedding_model": "nomic-embed-text",
                 "embedding_dimension": 768,
+                "chat_provider": "ollama",
+                "chat_model": "llama2",
                 "vector_db_type": "qdrant",
                 "chunk_size": 512,
                 "chunk_overlap": 50,
@@ -82,6 +110,11 @@ class KnowledgeBaseResponse(BaseModel):
     embedding_provider: EmbeddingProvider
     embedding_model: str
     embedding_dimension: int
+    embedding_endpoint: Optional[str]
+    
+    chat_provider: ChatProvider
+    chat_model: Optional[str]
+    chat_endpoint: Optional[str]
     
     vector_db_type: VectorDBType
     vector_db_config: Dict[str, Any]
@@ -109,4 +142,3 @@ class UpdateSchemaRequest(BaseModel):
     schema_fields: List[dict] = Field(..., description="Schema字段列表")
     vector_db_type: Optional[str] = Field(None, description="向量数据库类型")
     vector_db_config: Optional[Dict[str, Any]] = Field(None, description="向量数据库配置")
-

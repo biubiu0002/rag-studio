@@ -363,4 +363,37 @@ class KnowledgeBaseService:
         TODO: 实现
         """
         return {}
+    
+    async def update_ai_model_config(
+        self,
+        kb_id: str,
+        config: "AIModelConfigRequest"
+    ) -> bool:
+        """
+        更新知识库的AI模型配置
+        
+        Args:
+            kb_id: 知识库ID
+            config: AI模型配置请求对象
+        
+        Returns:
+            是否更新成功
+        """
+        # 检查知识库是否存在
+        kb = await self.repository.get_by_id(kb_id)
+        if not kb:
+            return False
+        
+        # 更新AI模型配置
+        kb.embedding_provider = config.embedding_provider
+        kb.embedding_model = config.embedding_model
+        kb.embedding_endpoint = config.embedding_endpoint
+        kb.chat_provider = config.chat_provider
+        kb.chat_model = config.chat_model
+        kb.chat_endpoint = config.chat_endpoint
+        
+        # 保存更新到仓储
+        await self.repository.update(kb_id, kb)
+        
+        return True
 

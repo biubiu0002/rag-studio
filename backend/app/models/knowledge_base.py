@@ -15,6 +15,12 @@ class EmbeddingProvider(str, Enum):
     CUSTOM = "custom"
 
 
+class ChatProvider(str, Enum):
+    """Chat模型提供商"""
+    OLLAMA = "ollama"
+    CUSTOM = "custom"
+
+
 class VectorDBType(str, Enum):
     """向量数据库类型"""
     ELASTICSEARCH = "elasticsearch"
@@ -35,6 +41,15 @@ class KnowledgeBase(BaseModelMixin):
     )
     embedding_model: str = Field(..., description="嵌入模型名称")
     embedding_dimension: int = Field(default=768, description="向量维度")
+    embedding_endpoint: Optional[str] = Field(None, description="嵌入模型服务地址")
+    
+    # Chat模型配置
+    chat_provider: ChatProvider = Field(
+        default=ChatProvider.OLLAMA,
+        description="Chat模型提供商"
+    )
+    chat_model: Optional[str] = Field(None, description="Chat模型名称")
+    chat_endpoint: Optional[str] = Field(None, description="Chat模型服务地址")
     
     # 向量数据库配置
     vector_db_type: VectorDBType = Field(..., description="向量数据库类型")
