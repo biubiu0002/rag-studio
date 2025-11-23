@@ -15,7 +15,7 @@ func main() {
 	// 初始化服务
 	embeddingService := NewEmbeddingService(config.OllamaBaseURL)
 
-	qdrantService, err := NewQdrantService(config.QdrantHost, config.QdrantPort, config.QdrantAPIKey)
+	qdrantService, err := NewQdrantService(config.QdrantHost, config.QdrantHTTPPort, config.QdrantGRPCPort, config.QdrantAPIKey)
 	if err != nil {
 		log.Fatalf("Failed to create Qdrant service: %v", err)
 	}
@@ -64,7 +64,8 @@ func main() {
 	addr := fmt.Sprintf("%s:%s", config.Host, config.Port)
 	log.Printf("Server starting on %s", addr)
 	log.Printf("Ollama URL: %s", config.OllamaBaseURL)
-	log.Printf("Qdrant: %s:%s", config.QdrantHost, config.QdrantPort)
+	log.Printf("Qdrant HTTP: %s:%s", config.QdrantHost, config.QdrantHTTPPort)
+	log.Printf("Qdrant gRPC: %s:%s", config.QdrantHost, config.QdrantGRPCPort)
 
 	if err := router.Run(addr); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
