@@ -93,8 +93,8 @@ func (s *RetrievalService) semanticSearch(ctx context.Context, kb *KnowledgeBase
 	// 3. 设置score_threshold
 	scoreThreshold := float32(req.ScoreThreshold)
 
-	// 4. 执行向量检索（传递知识库配置以获取正确的Qdrant连接）
-	results, err := s.qdrantService.Search(ctx, req.KBID, queryVectorFloat32, uint64(req.TopK), scoreThreshold, kb.VectorDBConfig)
+	// 4. 执行向量检索
+	results, err := s.qdrantService.Search(ctx, req.KBID, queryVectorFloat32, uint64(req.TopK), scoreThreshold)
 	if err != nil {
 		return nil, fmt.Errorf("vector search failed: %w", err)
 	}

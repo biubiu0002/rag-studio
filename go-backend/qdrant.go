@@ -222,7 +222,7 @@ func (s *QdrantService) SearchGRPC(ctx context.Context, collectionName string, q
 	}
 
 	// 执行搜索
-	result, err := (*pointsClient).Search(ctx, searchPoints)
+	result, err := (*s.pointsClient).Search(ctx, searchPoints)
 	if err != nil {
 		return nil, fmt.Errorf("search failed: %w", err)
 	}
