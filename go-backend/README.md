@@ -29,7 +29,7 @@ export OLLAMA_BASE_URL=http://localhost:11434
 
 # Qdrant配置
 export QDRANT_HOST=localhost
-export QDRANT_PORT=6333
+export QDRANT_PORT=6334  # 注意：Go客户端使用gRPC端口（6334），不是HTTP端口（6333）
 export QDRANT_API_KEY=  # 可选
 ```
 
@@ -117,6 +117,9 @@ go build -o rag-studio-go-backend .
 2. 目前只实现了语义向量检索（semantic模式）
 3. 稀疏向量和混合检索暂未实现
 4. 确保Qdrant和Ollama服务正常运行
+5. **重要**：Go客户端使用gRPC协议，需要连接到Qdrant的gRPC端口（默认6334），不是HTTP端口（6333）
+   - 如果知识库配置中的URL或端口是6333，代码会自动转换为6334
+   - 如果配置了自定义端口，请确保是gRPC端口
 
 ## 性能测试
 

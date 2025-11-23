@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strconv"
 
 	pb "github.com/qdrant/go-client/qdrant"
 	"google.golang.org/grpc"
@@ -11,31 +13,128 @@ import (
 
 // QdrantService Qdrant服务
 type QdrantService struct {
-	pointsClient *pb.PointsClient
+	defaultHost   string
+	defaultPort   string
+	defaultAPIKey string
+	connections   map[string]*pb.PointsClient // 缓存连接，key为host:port
 }
 
 // NewQdrantService 创建Qdrant服务
 func NewQdrantService(host, port, apiKey string) (*QdrantService, error) {
-	address := fmt.Sprintf("%s:%s", host, port)
-
-	// 创建gRPC连接
-	conn, err := grpc.Dial(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to Qdrant: %w", err)
-	}
-
-	// 创建Points客户端
-	pointsClient := pb.NewPointsClient(conn)
-
 	service := &QdrantService{
-		pointsClient: &pointsClient,
+		defaultHost:   host,
+		defaultPort:   port,
+		defaultAPIKey: apiKey,
+		connections:   make(map[string]*pb.PointsClient),
 	}
 
 	return service, nil
 }
 
+// getQdrantConnection 获取或创建Qdrant连接
+func (s *QdrantService) getQdrantConnection(kbConfig map[string]interface{}) (*pb.PointsClient, error) {
+	var host, port, apiKey string
+
+	// 从知识库配置中读取Qdrant连接信息
+	if kbConfig != nil {
+		if urlStr, ok := kbConfig["url"].(string); ok && urlStr != "" {
+			// 解析URL
+			parsedURL, err := url.Parse(urlStr)
+			if err == nil {
+				host = parsedURL.Hostname()
+				if parsedURL.Port() != "" {
+					port = parsedURL.Port()
+					// 如果端口是标准HTTP端口（6333），转换为gRPC端口（6334）
+					if port == "6333" {
+						port = "6334"
+					}
+				} else {
+					// 如果没有指定端口，使用默认gRPC端口
+					port = "6334"
+				}
+			}
+		} else {
+			// 从配置中读取host和port
+			if h, ok := kbConfig["host"].(string); ok {
+				host = h
+			}
+			if p, ok := kbConfig["port"]; ok {
+				switch v := p.(type) {
+				case string:
+					port = v
+					// 如果端口是标准HTTP端口（6333），转换为gRPC端口（6334）
+					if port == "6333" {
+						port = "6334"
+					}
+				case float64:
+					portInt := int(v)
+					port = strconv.Itoa(portInt)
+					// 如果端口是标准HTTP端口（6333），转换为gRPC端口（6334）
+					if portInt == 6333 {
+						port = "6334"
+					}
+				case int:
+					port = strconv.Itoa(v)
+					// 如果端口是标准HTTP端口（6333），转换为gRPC端口（6334）
+					if v == 6333 {
+						port = "6334"
+					}
+				}
+			}
+		}
+		if key, ok := kbConfig["api_key"].(string); ok {
+			apiKey = key
+		}
+	}
+
+	// 使用默认值
+	if host == "" {
+		host = s.defaultHost
+	}
+	if port == "" {
+		port = s.defaultPort
+		// 如果默认端口是HTTP端口（6333），转换为gRPC端口（6334）
+		if port == "6333" {
+			port = "6334"
+		}
+	} else if port == "6333" {
+		// 确保端口不是HTTP端口
+		port = "6334"
+	}
+	if apiKey == "" {
+		apiKey = s.defaultAPIKey
+	}
+
+	// 构建连接key
+	connKey := fmt.Sprintf("%s:%s", host, port)
+
+	// 检查是否已有连接
+	if client, ok := s.connections[connKey]; ok {
+		return client, nil
+	}
+
+	// 创建新的gRPC连接
+	address := fmt.Sprintf("%s:%s", host, port)
+	conn, err := grpc.Dial(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Qdrant at %s: %w", address, err)
+	}
+
+	// 创建Points客户端
+	pointsClient := pb.NewPointsClient(conn)
+	s.connections[connKey] = &pointsClient
+
+	return &pointsClient, nil
+}
+
 // Search 向量检索
-func (s *QdrantService) Search(ctx context.Context, collectionName string, queryVector []float32, topK uint64, scoreThreshold float32) ([]*RetrievalResult, error) {
+func (s *QdrantService) Search(ctx context.Context, collectionName string, queryVector []float32, topK uint64, scoreThreshold float32, kbConfig map[string]interface{}) ([]*RetrievalResult, error) {
+	// 获取Qdrant连接
+	pointsClient, err := s.getQdrantConnection(kbConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Qdrant connection: %w", err)
+	}
+
 	// 构建搜索请求
 	searchPoints := &pb.SearchPoints{
 		CollectionName: collectionName,
@@ -50,7 +149,7 @@ func (s *QdrantService) Search(ctx context.Context, collectionName string, query
 	}
 
 	// 执行搜索
-	result, err := (*s.pointsClient).Search(ctx, searchPoints)
+	result, err := (*pointsClient).Search(ctx, searchPoints)
 	if err != nil {
 		return nil, fmt.Errorf("search failed: %w", err)
 	}
