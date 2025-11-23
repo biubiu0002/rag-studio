@@ -30,8 +30,8 @@ export OLLAMA_BASE_URL=http://localhost:11434
 
 # Qdrant配置
 export QDRANT_HOST=localhost
-export QDRANT_HTTP_PORT=6333  # HTTP接口端口
-export QDRANT_GRPC_PORT=6334  # gRPC接口端口
+export QDRANT_HTTP_PORT=6334  # 注意：Go客户端使用gRPC端口（6334），不是HTTP端口（6333  # HTTP接口端口
+export QDRANT_GRPC_PORT=6334  # gRPC接口端口）
 export QDRANT_API_KEY=  # 可选
 ```
 
