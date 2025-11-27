@@ -180,7 +180,7 @@ if __name__ == "__main__":
         "task_executor:app",
         host=settings.HOST,
         port=8001,
-        reload=settings.DEBUG,
+        # reload=settings.DEBUG,
         log_level="info",
     )
 
