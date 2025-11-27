@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner";
+import Script from "next/script";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -23,8 +24,29 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // 在服务端读取环境变量（运行时获取）
+  // 优先级：API_BASE_URL > NEXT_PUBLIC_API_URL > 默认值
+  const apiBaseUrl =
+    process.env.API_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://localhost:8000/api/v1";
+
   return (
     <html lang="en">
+      <head>
+        {/* 注入运行时配置到 window 对象 */}
+        <Script
+          id="app-config"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.__APP_CONFIG__ = {
+                API_BASE_URL: ${JSON.stringify(apiBaseUrl)}
+              };
+            `,
+          }}
+        />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
