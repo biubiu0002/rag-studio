@@ -30,18 +30,42 @@ backend/
 │   ├── repositories/        # 数据访问层
 │   └── utils/               # 工具函数
 ├── storage/                 # JSON本地存储目录
-├── requirements.txt         # Python依赖
+├── pyproject.toml          # 项目配置和依赖（uv）
 ├── env.example             # 环境变量示例
 └── README.md               # 项目说明
 ```
 
 ## 快速开始
 
+### 前置要求
+
+- Python 3.11+
+- [uv](https://github.com/astral-sh/uv) - 快速Python包管理器
+
+安装uv：
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# 或使用pip
+pip install uv
+```
+
 ### 1. 安装依赖
+
+使用uv同步依赖并创建虚拟环境：
 
 ```bash
 cd backend
-pip install -r requirements.txt
+uv sync
+```
+
+如果需要安装开发依赖：
+```bash
+uv sync --extra dev
 ```
 
 ### 2. 配置环境变量
@@ -59,18 +83,53 @@ cp env.example .env
 
 ### 3. 启动服务
 
+使用uv运行（推荐，会自动使用虚拟环境）：
+
 ```bash
 # 方式1：使用启动脚本（推荐）
-python run.py
+uv run python run.py
 
 # 方式2：使用 uvicorn 命令
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # 方式3：生产环境（无热重载）
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+或者激活虚拟环境后运行：
+
+```bash
+# 激活虚拟环境（uv会在.venv目录创建虚拟环境）
+source .venv/bin/activate  # macOS/Linux
+# 或
+.venv\Scripts\activate  # Windows
+
+# 然后运行
+python run.py
 ```
 
 **注意**：请确保在 `backend` 目录下运行启动命令。
+
+### 依赖管理
+
+使用uv管理依赖：
+
+```bash
+# 添加新依赖
+uv add <package-name>
+
+# 添加开发依赖
+uv add --dev <package-name>
+
+# 移除依赖
+uv remove <package-name>
+
+# 同步依赖（根据pyproject.toml更新虚拟环境）
+uv sync
+
+# 更新所有依赖到最新版本
+uv sync --upgrade
+```
 
 ### 4. 访问文档
 
