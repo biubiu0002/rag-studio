@@ -2,59 +2,17 @@
  * API客户端
  * 统一管理与后端的API调用
  */
-
-/**
- * API 基础 URL 配置（运行时获取）
- * 
- * 优先级：
- * 1. window.__APP_CONFIG__.API_BASE_URL（运行时注入，容器环境变量）
- * 2. process.env.NEXT_PUBLIC_API_URL（构建时环境变量，向后兼容）
- * 3. 默认值 http://localhost:8000/api/v1
- * 
- * 生命周期说明：
- * - 运行时获取：配置在容器启动时通过环境变量注入到 HTML 中
- * - 无需重新构建：修改环境变量后重启容器即可生效
- * - 适合容器化部署：同一镜像可以在不同环境使用不同配置
- * 
- * 环境变量维护：
- * 1. 开发环境：在项目根目录创建 `.env.local` 文件
- *    示例内容：API_BASE_URL=http://localhost:8000/api/v1
- *             或 NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1（向后兼容）
- * 
- * 2. 生产环境（容器部署）：在容器启动时设置环境变量
- *    示例：docker run -e API_BASE_URL=http://api.example.com/api/v1 ...
- * 
- * 3. 默认值：如果未设置环境变量，将使用 localhost:8000 作为默认值
- */
-
-/**
- * 动态获取 API 基础 URL（运行时）
- * 优先从 window.__APP_CONFIG__ 获取（运行时注入），
- * 其次从环境变量获取（向后兼容），
- * 最后使用默认值
- */
+import { env } from "next-runtime-env";
 function getApiBaseUrl(): string {
-  // 客户端：优先从 window 对象获取（运行时注入）
-  if (typeof window !== "undefined" && window.__APP_CONFIG__?.API_BASE_URL) {
-    return window.__APP_CONFIG__.API_BASE_URL;
-  }
-  
-  // 服务端或向后兼容：使用环境变量
-  if (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL) {
-    return process.env.NEXT_PUBLIC_API_URL;
-  }
-  
-  // 默认值
-  return "http://localhost:8000/api/v1";
+  return (
+    env("NEXT_PUBLIC_API_URL") ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://localhost:8000"
+  );
 }
 
 // 导出获取函数，供外部使用
 export const getAPIBaseURL = getApiBaseUrl;
-
-// 为了向后兼容，保留一个变量（但会在首次导入时获取）
-// 注意：在客户端，这个值可能在 window.__APP_CONFIG__ 注入之前被初始化
-// 因此 request 函数中会使用动态获取函数
-const API_BASE_URL = getApiBaseUrl();
 
 // ========== 通用类型 ==========
 
