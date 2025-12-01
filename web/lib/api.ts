@@ -2,9 +2,17 @@
  * API客户端
  * 统一管理与后端的API调用
  */
+import { env } from "next-runtime-env";
+function getApiBaseUrl(): string {
+  return (
+    env("NEXT_PUBLIC_API_URL") ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://localhost:8000"
+  );
+}
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+// 导出获取函数，供外部使用
+export const getAPIBaseURL = getApiBaseUrl;
 
 // ========== 通用类型 ==========
 
