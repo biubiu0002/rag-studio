@@ -40,7 +40,7 @@ async function request<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const url = `${API_BASE_URL}${endpoint}`;
+  const url = `${getApiBaseUrl()}${endpoint}`;
 
   // 如果 body 是 FormData，不要设置 Content-Type，让浏览器自动设置
   const isFormData = options.body instanceof FormData;
